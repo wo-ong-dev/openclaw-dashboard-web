@@ -57,12 +57,28 @@ export type CandleSourceMeta = {
   warning: string | null;
   lastCandleTs: string | null;
   decisionLatestTs: string | null;
+  lagMin: number | null;
+  staleThresholdMin: number;
+  staleFeed: boolean;
+};
+
+export type FreshnessMeta = {
+  collectorLagSec: number | null;
+  rawWriteLagSec: number | null;
+  sync1mLagSec: number | null;
+  sync5mLagSec: number | null;
+  executorLagSec: number | null;
+  selfHealLast1h: number;
+  selfHealLast24h: number;
+  healthScore: number;
+  policyState: "recovered" | "watch" | "degraded";
 };
 
 export type DashboardPayload = {
   snapshotSchemaVersion: string;
   symbol: string;
   updatedAt: string;
+  freshness: FreshnessMeta;
   market: {
     lastPrice: number | null;
     changePct: number | null;

@@ -9,6 +9,9 @@ const DEFAULT_LIVE_DATA_DIR = path.resolve(process.cwd(), "../data/live");
 
 const outputsDir = process.env.OUTPUTS_DIR ?? DEFAULT_OUTPUTS_DIR;
 const liveDataDir = process.env.LIVE_DATA_DIR ?? DEFAULT_LIVE_DATA_DIR;
+const runtimeLagBreakdownFile = path.join(outputsDir, "runtime_lag_breakdown.json");
+const runtimeHealthFile = path.join(outputsDir, "runtime_health.json");
+const runtimeSelfHealFile = path.join(outputsDir, "runtime_self_heal_actions.jsonl");
 
 async function readTextSafe(filePath: string): Promise<string> {
   try {
@@ -183,6 +186,42 @@ async function readJsonl(filePath: string, limit = 50): Promise<Record<string, u
     });
 }
 
+function asNullableNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function countRecentSelfHeal(rows: Record<string, unknown>[], nowMs: number, windowMs: number): number {
+  const since = nowMs - windowMs;
+  return rows.filter((row) => {
+    const tsSec = asNullableNumber(row.ts);
+    if (tsSec === null) return false;
+    return tsSec * 1000 >= since;
+  }).length;
+}
+
+function calcFreshnessHealthScore(params: {
+  collectorLagSec: number | null;
+  sync1mLagSec: number | null;
+  sync5mLagSec: number | null;
+  selfHealLast1h: number;
+  policyState: "recovered" | "watch" | "degraded";
+}): number {
+  const { collectorLagSec, sync1mLagSec, sync5mLagSec, selfHealLast1h, policyState } = params;
+  let score = 100;
+
+  if (collectorLagSec !== null) score -= Math.min(35, Math.floor(collectorLagSec / 8));
+  if (sync1mLagSec !== null) score -= Math.min(30, Math.floor(sync1mLagSec / 12));
+  if (sync5mLagSec !== null) score -= Math.min(25, Math.floor(sync5mLagSec / 30));
+  score -= Math.min(20, selfHealLast1h * 4);
+
+  if (policyState === "watch") score -= 8;
+  if (policyState === "degraded") score -= 20;
+
+  return Math.max(0, Math.min(100, score));
+}
+
 function signalQualityFromDecision(d: Record<string, unknown> | undefined): StrategyCard["signalQuality"] {
   if (!d) return "unknown";
   const finalSignal = parseNum((d.final_signal as string) ?? (d.final_signal as number));
@@ -280,13 +319,15 @@ function buildExecutionDiagnosticsFromActivity(rows: Record<string, unknown>[]):
 }
 
 export async function getDashboardPayload(): Promise<DashboardPayload> {
-  const [candles1m, candles5m, perfSummary, perfRawAlerts, eventActivityRaw, executionDiagnosticsRaw] = await Promise.all([
+  const [candles1m, candles5m, perfSummary, perfRawAlerts, eventActivityRaw, executionDiagnosticsRaw, runtimeLag, runtimeHealth] = await Promise.all([
     readCandlesFromCsv("btc_1m.csv", 240),
     readCandlesFromCsv("btc_5m.csv", 240),
     readJsonSafe<{ profiles?: Array<Record<string, unknown>> }>(path.join(outputsDir, "alerts_performance.json"), {}),
     readJsonSafe<Record<string, unknown>>(path.join(outputsDir, "alerts_performance.json"), {}),
     readJsonl(path.join(outputsDir, "event_executor_activity.jsonl"), 200),
     readJsonSafe<Record<string, unknown>>(path.join(outputsDir, "execution_diagnostics_60m.json"), {}),
+    readJsonSafe<Record<string, unknown>>(runtimeLagBreakdownFile, {}),
+    readJsonSafe<Record<string, unknown>>(runtimeHealthFile, {}),
   ]);
 
   const profiles: Array<"A" | "B" | "C"> = ["A", "B", "C"];
@@ -303,6 +344,7 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
   );
 
   const opsAlertsRaw = await readJsonl(path.join(outputsDir, "alerts_ops.jsonl"), 30);
+  const selfHealRows = await readJsonl(runtimeSelfHealFile, 500);
 
   const performanceProfiles = new Map<string, Record<string, unknown>>(
     (perfSummary.profiles ?? []).map((p) => [String(p.profile), p]),
@@ -470,10 +512,33 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
         source: "execution_diagnostics",
       };
 
+  const collectorLagSec = asNullableNumber(runtimeLag.collector_lag_sec);
+  const rawWriteLagSec = asNullableNumber(runtimeLag.raw_write_lag_sec);
+  const sync1mLagSec = asNullableNumber(runtimeLag.sync_1m_lag_sec);
+  const sync5mLagSec = asNullableNumber(runtimeLag.sync_5m_lag_sec);
+  const executorLagSec = asNullableNumber(runtimeLag.executor_activity_lag_sec);
+  const policyStateRaw = String((runtimeHealth.data_freshness_slo as Record<string, unknown> | undefined)?.policy_state ?? "recovered");
+  const policyState = (policyStateRaw === "watch" || policyStateRaw === "degraded") ? policyStateRaw : "recovered";
+  const selfHealLast1h = countRecentSelfHeal(selfHealRows, nowMs, 60 * 60 * 1000);
+  const selfHealLast24h = countRecentSelfHeal(selfHealRows, nowMs, 24 * 60 * 60 * 1000);
+
+  const freshness = {
+    collectorLagSec,
+    rawWriteLagSec,
+    sync1mLagSec,
+    sync5mLagSec,
+    executorLagSec,
+    selfHealLast1h,
+    selfHealLast24h,
+    healthScore: calcFreshnessHealthScore({ collectorLagSec, sync1mLagSec, sync5mLagSec, selfHealLast1h, policyState }),
+    policyState,
+  } as const;
+
   return {
     snapshotSchemaVersion: SNAPSHOT_SCHEMA_VERSION,
     symbol: "KRW-BTC",
     updatedAt: new Date().toISOString(),
+    freshness,
     market: {
       lastPrice: last?.close ?? null,
       changePct: first && last ? ((last.close - first.open) / first.open) * 100 : null,
@@ -489,6 +554,9 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
       warning: candleSelection.warning,
       lastCandleTs: candles.at(-1)?.time ? new Date(candles.at(-1)!.time * 1000).toISOString() : null,
       decisionLatestTs: latestDecisionMs > 0 ? new Date(latestDecisionMs).toISOString() : null,
+      lagMin: sync1mLagSec !== null ? sync1mLagSec / 60 : null,
+      staleThresholdMin: 4,
+      staleFeed: sync1mLagSec !== null ? sync1mLagSec > 240 : false,
     },
     strategies,
     decisions: traderDecisions,

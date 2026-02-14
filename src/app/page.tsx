@@ -129,6 +129,8 @@ export default function Home() {
 
           <StrategyCompareCard summary={strategySummary} />
 
+          <FreshnessPanel data={data} />
+
           <section className="grid grid-cols-1 xl:grid-cols-4 gap-4">
             <div className="xl:col-span-3 rounded-xl border border-slate-800 bg-[#0b1220] p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -271,6 +273,41 @@ export default function Home() {
         </div>
       </main>
     </>
+  );
+}
+
+function FreshnessPanel({ data }: { data: DashboardPayload | null }) {
+  const freshness = data?.freshness;
+  if (!freshness) return null;
+
+  const stateTone =
+    freshness.policyState === "degraded"
+      ? "text-rose-300 border-rose-700/60 bg-rose-950/30"
+      : freshness.policyState === "watch"
+        ? "text-amber-300 border-amber-700/60 bg-amber-950/30"
+        : "text-emerald-300 border-emerald-700/60 bg-emerald-950/30";
+
+  const lag = (sec: number | null) => (sec === null ? "-" : `${fmt(sec, 0)}s`);
+
+  return (
+    <section className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <SectionTitle title="데이터 신선도" subtitle="collector → raw → sync → executor 실시간 상태" />
+        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${stateTone}`}>
+          health {freshness.healthScore}/100 · {freshness.policyState}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+        <Stat label="collector" value={lag(freshness.collectorLagSec)} />
+        <Stat label="raw write" value={lag(freshness.rawWriteLagSec)} />
+        <Stat label="sync 1m" value={lag(freshness.sync1mLagSec)} />
+        <Stat label="sync 5m" value={lag(freshness.sync5mLagSec)} />
+        <Stat label="executor" value={lag(freshness.executorLagSec)} />
+      </div>
+      <p className="mt-2 text-xs text-slate-400">
+        self-heal 1h {freshness.selfHealLast1h}회 · 24h {freshness.selfHealLast24h}회
+      </p>
+    </section>
   );
 }
 
