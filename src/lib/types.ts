@@ -40,6 +40,15 @@ export type AlertRow = {
   message: string;
 };
 
+export type CandleSourceMeta = {
+  selectedTimeframe: "1m" | "5m";
+  selectedSourceFile: string;
+  fallbackFrom: "1m" | null;
+  warning: string | null;
+  lastCandleTs: string | null;
+  decisionLatestTs: string | null;
+};
+
 export type DashboardPayload = {
   snapshotSchemaVersion: string;
   symbol: string;
@@ -51,6 +60,7 @@ export type DashboardPayload = {
     low24h: number | null;
     volume24h: number | null;
   };
+  candleSource: CandleSourceMeta;
   candles: CandlePoint[];
   strategies: StrategyCard[];
   decisions: DecisionRow[];

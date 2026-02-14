@@ -52,8 +52,8 @@ function buildRecentTradeSnapshot(rows: Record<string, unknown>[], nowMs: number
   return { pnlKrw, trades };
 }
 
-async function readCandles(limit = 240): Promise<CandlePoint[]> {
-  const csv = await readTextSafe(path.join(liveDataDir, "btc_1m.csv"));
+async function readCandlesFromCsv(fileName: string, limit = 240): Promise<CandlePoint[]> {
+  const csv = await readTextSafe(path.join(liveDataDir, fileName));
   if (!csv) return [];
 
   const lines = csv.trim().split(/\r?\n/);
@@ -72,6 +72,88 @@ async function readCandles(limit = 240): Promise<CandlePoint[]> {
       };
     })
     .filter((c) => c.time > 0);
+}
+
+function latestDecisionTimelineMs(
+  eventActivityRows: Record<string, unknown>[],
+  decisionsByProfile: Record<string, unknown>[][],
+): number {
+  const eventTsMs = eventActivityRows.reduce((acc, row) => Math.max(acc, parseIsoMs(row.bar_ts ?? row.ts)), 0);
+  const decisionTsMs = decisionsByProfile.flat().reduce((acc, row) => Math.max(acc, parseIsoMs(row.ts)), 0);
+  return Math.max(eventTsMs, decisionTsMs);
+}
+
+function selectCandleSource(params: {
+  candles1m: CandlePoint[];
+  candles5m: CandlePoint[];
+  latestDecisionMs: number;
+  nowMs: number;
+}): {
+  candles: CandlePoint[];
+  selectedTimeframe: "1m" | "5m";
+  selectedSourceFile: string;
+  fallbackFrom: "1m" | null;
+  warning: string | null;
+} {
+  const { candles1m, candles5m, latestDecisionMs, nowMs } = params;
+  const last1 = candles1m.at(-1)?.time ? candles1m.at(-1)!.time * 1000 : 0;
+  const last5 = candles5m.at(-1)?.time ? candles5m.at(-1)!.time * 1000 : 0;
+
+  if (candles1m.length === 0 && candles5m.length > 0) {
+    return {
+      candles: candles5m,
+      selectedTimeframe: "5m",
+      selectedSourceFile: "btc_5m.csv",
+      fallbackFrom: "1m",
+      warning: "1m 캔들이 비어 5m 캔들로 대체 표시 중",
+    };
+  }
+
+  if (candles1m.length === 0) {
+    return {
+      candles: [],
+      selectedTimeframe: "1m",
+      selectedSourceFile: "btc_1m.csv",
+      fallbackFrom: null,
+      warning: null,
+    };
+  }
+
+  if (candles5m.length === 0) {
+    return {
+      candles: candles1m,
+      selectedTimeframe: "1m",
+      selectedSourceFile: "btc_1m.csv",
+      fallbackFrom: null,
+      warning: null,
+    };
+  }
+
+  const decisionGap1m = latestDecisionMs > 0 ? latestDecisionMs - last1 : 0;
+  const decisionGap5m = latestDecisionMs > 0 ? latestDecisionMs - last5 : 0;
+  const age1m = last1 > 0 ? nowMs - last1 : Number.POSITIVE_INFINITY;
+
+  const oneMinuteStaleVsDecision = decisionGap1m > 4 * 60 * 1000;
+  const fiveMinuteStillUsable = decisionGap5m <= 10 * 60 * 1000;
+  const oneMinuteTooOld = age1m > 8 * 60 * 1000;
+
+  if ((oneMinuteStaleVsDecision && fiveMinuteStillUsable) || oneMinuteTooOld) {
+    return {
+      candles: candles5m,
+      selectedTimeframe: "5m",
+      selectedSourceFile: "btc_5m.csv",
+      fallbackFrom: "1m",
+      warning: "1m 캔들이 실행 타임라인보다 지연되어 5m 캔들로 자동 전환",
+    };
+  }
+
+  return {
+    candles: candles1m,
+    selectedTimeframe: "1m",
+    selectedSourceFile: "btc_1m.csv",
+    fallbackFrom: null,
+    warning: null,
+  };
 }
 
 async function readJsonSafe<T>(filePath: string, fallback: T): Promise<T> {
@@ -146,8 +228,9 @@ function buildExecutionDiagnosticsFromActivity(rows: Record<string, unknown>[]):
 }
 
 export async function getDashboardPayload(): Promise<DashboardPayload> {
-  const [candles, perfSummary, perfRawAlerts, eventActivityRaw, executionDiagnosticsRaw] = await Promise.all([
-    readCandles(240),
+  const [candles1m, candles5m, perfSummary, perfRawAlerts, eventActivityRaw, executionDiagnosticsRaw] = await Promise.all([
+    readCandlesFromCsv("btc_1m.csv", 240),
+    readCandlesFromCsv("btc_5m.csv", 240),
     readJsonSafe<{ profiles?: Array<Record<string, unknown>> }>(path.join(outputsDir, "alerts_performance.json"), {}),
     readJsonSafe<Record<string, unknown>>(path.join(outputsDir, "alerts_performance.json"), {}),
     readJsonl(path.join(outputsDir, "event_executor_activity.jsonl"), 200),
@@ -174,6 +257,9 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
   );
 
   const nowMs = Date.now();
+  const latestDecisionMs = latestDecisionTimelineMs(eventActivityRaw, decisionsByProfile);
+  const candleSelection = selectCandleSource({ candles1m, candles5m, latestDecisionMs, nowMs });
+  const candles = candleSelection.candles;
 
   const strategies: StrategyCard[] = profiles.map((profile, idx) => {
     const st = stateEntries[idx] ?? {};
@@ -291,6 +377,14 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
       volume24h,
     },
     candles,
+    candleSource: {
+      selectedTimeframe: candleSelection.selectedTimeframe,
+      selectedSourceFile: candleSelection.selectedSourceFile,
+      fallbackFrom: candleSelection.fallbackFrom,
+      warning: candleSelection.warning,
+      lastCandleTs: candles.at(-1)?.time ? new Date(candles.at(-1)!.time * 1000).toISOString() : null,
+      decisionLatestTs: latestDecisionMs > 0 ? new Date(latestDecisionMs).toISOString() : null,
+    },
     strategies,
     decisions: mergedDecisions,
     executionDiagnostics,

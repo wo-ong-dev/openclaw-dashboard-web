@@ -82,6 +82,10 @@ export default function Home() {
   const strategies = data?.strategies ?? [];
   const mobileStrategyCard = strategies.find((s) => s.profile === mobileStrategy) ?? strategies[0] ?? null;
   const strategySummary = useMemo(() => deriveStrategyCompareSummary(strategies), [strategies]);
+  const candleMeta = data?.candleSource;
+  const candleSubtitle = candleMeta
+    ? `${candleMeta.selectedTimeframe} 캔들 · 소스 ${candleMeta.selectedSourceFile} · 마지막 캔들 ${formatKstDateTime(candleMeta.lastCandleTs)} · 축/툴팁 시간 KST`
+    : "캔들 · 축/툴팁 시간 KST";
 
   return (
     <>
@@ -127,7 +131,18 @@ export default function Home() {
 
           <section className="grid grid-cols-1 xl:grid-cols-4 gap-4">
             <div className="xl:col-span-3 rounded-xl border border-slate-800 bg-[#0b1220] p-4">
-              <SectionTitle title="캔들 차트" subtitle="1m 캔들 · 축/툴팁 시간 KST" />
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <SectionTitle title="캔들 차트" subtitle={candleSubtitle} />
+                {candleMeta ? (
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                    candleMeta.fallbackFrom ? "bg-amber-950/60 text-amber-300 border-amber-700/60" : "bg-sky-950/50 text-sky-300 border-sky-700/60"
+                  }`}>
+                    소스 {candleMeta.selectedTimeframe}
+                    {candleMeta.fallbackFrom ? " (auto-fallback)" : ""}
+                  </span>
+                ) : null}
+              </div>
+              {candleMeta?.warning ? <InlineState kind="loading" message={candleMeta.warning} /> : null}
               {data?.candles?.length ? <CandleChart data={data.candles} /> : <PanelState kind="empty" message="표시할 캔들 데이터가 없습니다." />}
             </div>
 
