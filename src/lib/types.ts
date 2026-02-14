@@ -29,7 +29,7 @@ export type DecisionRow = {
   ts: string;
   profile: "A" | "B" | "C" | "EVT";
   signal: number;
-  action: "BUY" | "SELL" | "HOLD" | "EXECUTED" | "SKIPPED";
+  action: "BUY" | "SELL" | "HOLD" | "EXECUTED" | "SKIPPED" | "REJECTED";
   reason: string;
 };
 
@@ -68,7 +68,10 @@ export type DashboardPayload = {
     last60m_expected: number;
     observed_events: number;
     executed_decisions: number;
+    skipped_total: number;
     skipped_reasons: Record<string, number>;
+    rejected_total: number;
+    rejected_reasons: Record<string, number>;
     source: "event_activity" | "execution_diagnostics" | "fallback";
   };
   alerts: {

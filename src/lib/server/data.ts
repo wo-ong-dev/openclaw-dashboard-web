@@ -206,6 +206,7 @@ function buildExecutionDiagnosticsFromActivity(rows: Record<string, unknown>[]):
   const bars = new Set<string>();
   let executed = 0;
   const skippedReasons: Record<string, number> = {};
+  const rejectedReasons: Record<string, number> = {};
 
   for (const r of rows) {
     const tsMs = parseIsoMs(r.ts);
@@ -216,13 +217,20 @@ function buildExecutionDiagnosticsFromActivity(rows: Record<string, unknown>[]):
       const reason = typeof r.reason === "string" && r.reason ? r.reason : "unknown";
       skippedReasons[reason] = (skippedReasons[reason] ?? 0) + 1;
     }
+    if (r.status === "rejected") {
+      const reason = typeof r.reason === "string" && r.reason ? r.reason : "unknown";
+      rejectedReasons[reason] = (rejectedReasons[reason] ?? 0) + 1;
+    }
   }
 
   return {
     last60m_expected: 12,
     observed_events: bars.size,
     executed_decisions: executed,
+    skipped_total: Object.values(skippedReasons).reduce((a, b) => a + b, 0),
     skipped_reasons: skippedReasons,
+    rejected_total: Object.values(rejectedReasons).reduce((a, b) => a + b, 0),
+    rejected_reasons: rejectedReasons,
     source: "event_activity",
   };
 }
@@ -295,12 +303,12 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
     .flatMap((r) => {
       const ts = String(r.ts ?? r.bar_ts ?? "");
       const status = String(r.status ?? "");
-      if (!ts || (status !== "executed" && status !== "skipped")) return [];
+      if (!ts || (status !== "executed" && status !== "skipped" && status !== "rejected")) return [];
       const row: DecisionRow = {
         ts,
         profile: "EVT",
         signal: 0,
-        action: status === "executed" ? "EXECUTED" : "SKIPPED",
+        action: status === "executed" ? "EXECUTED" : status === "rejected" ? "REJECTED" : "SKIPPED",
         reason: status === "executed" ? "event_5m_trigger" : String(r.reason ?? "unknown"),
       };
       return [row];
@@ -358,9 +366,15 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
         last60m_expected: parseNum(executionDiagnosticsRaw.expected_5m_events as string | number) || 12,
         observed_events: parseNum(executionDiagnosticsRaw.observed_5m_events as string | number),
         executed_decisions: parseNum(executionDiagnosticsRaw.executed_decisions as string | number),
+        skipped_total: parseNum(executionDiagnosticsRaw.skipped_total as string | number),
         skipped_reasons:
           typeof executionDiagnosticsRaw.skipped_reasons === "object" && executionDiagnosticsRaw.skipped_reasons !== null
             ? (executionDiagnosticsRaw.skipped_reasons as Record<string, number>)
+            : {},
+        rejected_total: parseNum(executionDiagnosticsRaw.rejected_total as string | number),
+        rejected_reasons:
+          typeof executionDiagnosticsRaw.rejected_reasons === "object" && executionDiagnosticsRaw.rejected_reasons !== null
+            ? (executionDiagnosticsRaw.rejected_reasons as Record<string, number>)
             : {},
         source: "execution_diagnostics",
       };

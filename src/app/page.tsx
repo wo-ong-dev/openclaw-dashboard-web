@@ -194,6 +194,8 @@ export default function Home() {
                 <ExecutionBadge
                   executed={data?.executionDiagnostics?.executed_decisions ?? 0}
                   expected={data?.executionDiagnostics?.last60m_expected ?? 12}
+                  skipped={data?.executionDiagnostics?.skipped_total ?? 0}
+                  rejected={data?.executionDiagnostics?.rejected_total ?? 0}
                 />
               </div>
               {(data?.decisions ?? []).length === 0 ? (
@@ -538,17 +540,17 @@ function FreshnessBadge({ tone, label }: { tone: "fresh" | "stale" | "old"; labe
   return <span className={`rounded-full border px-2 py-0.5 text-[11px] ${styles}`}>신선도: {label}</span>;
 }
 
-function ExecutionBadge({ executed, expected }: { executed: number; expected: number }) {
+function ExecutionBadge({ executed, expected, skipped, rejected }: { executed: number; expected: number; skipped: number; rejected: number }) {
   const ratio = expected > 0 ? executed / expected : 0;
-  const warn = ratio < 0.5;
+  const warn = ratio < 0.5 || rejected > 0;
   return (
     <span
       className={`rounded-full border px-2 py-0.5 text-[11px] ${
         warn ? "bg-amber-950/60 text-amber-300 border-amber-700/60" : "bg-emerald-950/60 text-emerald-300 border-emerald-700/60"
       }`}
-      title="최근 60분 이벤트 기반 실행 커버리지"
+      title="최근 60분 실행/스킵/거절 진단"
     >
-      최근 60분 실행 {executed}/{expected}
+      60분 실행 {executed}/{expected} · 스킵 {skipped} · 거절 {rejected}
     </span>
   );
 }
