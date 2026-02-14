@@ -99,6 +99,14 @@ export type DashboardPayload = {
     skipped_reasons: Record<string, number>;
     rejected_total: number;
     rejected_reasons: Record<string, number>;
+    reason_split: {
+      stale_bar: number;
+      entry_filter: number;
+      risk_hold: number;
+      executor_locked: number;
+    };
+    actionable_now: boolean;
+    actionable_reason: string;
     source: "event_activity" | "execution_diagnostics" | "fallback";
   };
   alerts: {

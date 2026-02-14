@@ -306,6 +306,16 @@ function buildExecutionDiagnosticsFromActivity(rows: Record<string, unknown>[]):
     }
   }
 
+  const reasonSplit = {
+    stale_bar: skippedReasons.stale_bar ?? 0,
+    entry_filter: skippedReasons.entry_filter ?? 0,
+    risk_hold: skippedReasons.risk_hold ?? 0,
+    executor_locked: skippedReasons.executor_locked ?? 0,
+  };
+
+  const actionableNow = reasonSplit.stale_bar <= 1 && reasonSplit.executor_locked === 0;
+  const actionableReason = actionableNow ? "actionable" : reasonSplit.stale_bar > 1 ? "stale_bar_dominant" : "executor_locked";
+
   return {
     last60m_expected: 12,
     observed_events: bars.size,
@@ -314,6 +324,9 @@ function buildExecutionDiagnosticsFromActivity(rows: Record<string, unknown>[]):
     skipped_reasons: skippedReasons,
     rejected_total: Object.values(rejectedReasons).reduce((a, b) => a + b, 0),
     rejected_reasons: rejectedReasons,
+    reason_split: reasonSplit,
+    actionable_now: actionableNow,
+    actionable_reason: actionableReason,
     source: "event_activity",
   };
 }
@@ -509,6 +522,17 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
           typeof executionDiagnosticsRaw.rejected_reasons === "object" && executionDiagnosticsRaw.rejected_reasons !== null
             ? (executionDiagnosticsRaw.rejected_reasons as Record<string, number>)
             : {},
+        reason_split: {
+          stale_bar: parseNum((executionDiagnosticsRaw.skipped_reasons as Record<string, number> | undefined)?.stale_bar),
+          entry_filter: parseNum((executionDiagnosticsRaw.skipped_reasons as Record<string, number> | undefined)?.entry_filter),
+          risk_hold: parseNum((executionDiagnosticsRaw.skipped_reasons as Record<string, number> | undefined)?.risk_hold),
+          executor_locked: parseNum((executionDiagnosticsRaw.skipped_reasons as Record<string, number> | undefined)?.executor_locked),
+        },
+        actionable_now: parseNum((executionDiagnosticsRaw.skipped_reasons as Record<string, number> | undefined)?.stale_bar) <= 1,
+        actionable_reason:
+          parseNum((executionDiagnosticsRaw.skipped_reasons as Record<string, number> | undefined)?.stale_bar) <= 1
+            ? "actionable"
+            : "stale_bar_dominant",
         source: "execution_diagnostics",
       };
 
