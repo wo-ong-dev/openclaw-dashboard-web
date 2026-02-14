@@ -27,9 +27,19 @@ export type StrategyCard = {
 
 export type DecisionRow = {
   ts: string;
-  profile: "A" | "B" | "C" | "EVT";
-  signal: number;
-  action: "BUY" | "SELL" | "HOLD" | "EXECUTED" | "SKIPPED" | "REJECTED";
+  profile: "A" | "B" | "C";
+  direction: "LONG" | "SHORT" | "NONE";
+  result: "ENTRY" | "NO_ENTRY" | "EXIT" | "SKIP";
+  reason: string;
+  sizePct: number | null;
+  amountKrw: number | null;
+  amountIsEstimated: boolean;
+};
+
+export type SystemLogRow = {
+  ts: string;
+  source: "EVT";
+  status: "executed" | "skipped" | "rejected" | "info";
   reason: string;
 };
 
@@ -64,6 +74,7 @@ export type DashboardPayload = {
   candles: CandlePoint[];
   strategies: StrategyCard[];
   decisions: DecisionRow[];
+  systemLogs: SystemLogRow[];
   executionDiagnostics: {
     last60m_expected: number;
     observed_events: number;

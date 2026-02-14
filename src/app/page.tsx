@@ -207,9 +207,11 @@ export default function Home() {
                       <tr>
                         <th className="text-left py-1">시간 (KST)</th>
                         <th className="text-left py-1">프로필</th>
-                        <th className="text-left py-1">신호</th>
-                        <th className="text-left py-1">행동</th>
-                        <th className="text-left py-1">사유</th>
+                        <th className="text-left py-1">방향</th>
+                        <th className="text-left py-1">결정 결과</th>
+                        <th className="text-left py-1">핵심 사유</th>
+                        <th className="text-left py-1">투자 비중</th>
+                        <th className="text-left py-1">투입금액</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -217,17 +219,48 @@ export default function Home() {
                         <tr key={`${d.ts}-${d.profile}-${i}`} className="border-t border-slate-900/90 align-top">
                           <td className="py-1 pr-2 text-slate-300">{formatKstDateTime(d.ts)}</td>
                           <td className="py-1 pr-2">{d.profile}</td>
-                          <td className="py-1 pr-2">{d.signal}</td>
-                          <td className="py-1 pr-2">{d.action}</td>
-                          <td className="py-1 truncate max-w-[240px] text-slate-300" title={d.reason}>
-                            {d.reason}
-                          </td>
+                          <td className="py-1 pr-2">{directionLabel(d.direction)}</td>
+                          <td className="py-1 pr-2">{resultLabel(d.result)}</td>
+                          <td className="py-1 truncate max-w-[220px] text-slate-300" title={d.reason}>{d.reason}</td>
+                          <td className="py-1 pr-2">{d.sizePct === null ? "-" : `${fmt(d.sizePct, 2)}%`}</td>
+                          <td className="py-1 pr-2 text-slate-300">{d.amountKrw === null ? "-" : `${fmt(d.amountKrw, 0)} KRW${d.amountIsEstimated ? " (추정)" : ""}`}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               )}
+            <div className="mt-3 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3">
+              <details>
+                <summary className="cursor-pointer text-xs text-slate-300">시스템 로그 (내부 EVT/인프라 이벤트)</summary>
+                <div className="mt-2 max-h-40 overflow-auto text-[11px]">
+                  {(data?.systemLogs ?? []).length === 0 ? (
+                    <p className="text-slate-500">시스템 로그가 없습니다.</p>
+                  ) : (
+                    <table className="w-full">
+                      <thead className="text-slate-500">
+                        <tr>
+                          <th className="text-left py-1">시간 (KST)</th>
+                          <th className="text-left py-1">소스</th>
+                          <th className="text-left py-1">상태</th>
+                          <th className="text-left py-1">사유</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(data?.systemLogs ?? []).map((log, idx) => (
+                          <tr key={`${log.ts}-${idx}`} className="border-t border-slate-900/90">
+                            <td className="py-1 pr-2 text-slate-300">{formatKstDateTime(log.ts)}</td>
+                            <td className="py-1 pr-2">{log.source}</td>
+                            <td className="py-1 pr-2">{log.status}</td>
+                            <td className="py-1 pr-2 text-slate-400">{log.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </details>
+            </div>
             </div>
 
             <div className="space-y-3">
@@ -499,6 +532,19 @@ function getSignalMeta(signal: StrategyCard["signalQuality"]) {
     default:
       return { activeKey: "", className: "border-slate-700 bg-slate-900/40 text-slate-400" } as const;
   }
+}
+
+function directionLabel(direction: DashboardPayload["decisions"][number]["direction"]) {
+  if (direction === "LONG") return "롱";
+  if (direction === "SHORT") return "숏";
+  return "없음";
+}
+
+function resultLabel(result: DashboardPayload["decisions"][number]["result"]) {
+  if (result === "ENTRY") return "진입";
+  if (result === "NO_ENTRY") return "미진입";
+  if (result === "EXIT") return "청산";
+  return "스킵";
 }
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {

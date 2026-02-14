@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { AlertRow, CandlePoint, DashboardPayload, DecisionRow, StrategyCard } from "@/lib/types";
+import { AlertRow, CandlePoint, DashboardPayload, DecisionRow, StrategyCard, SystemLogRow } from "@/lib/types";
 
 const SNAPSHOT_SCHEMA_VERSION = "dashboard.v2";
 
@@ -194,10 +194,54 @@ function signalQualityFromDecision(d: Record<string, unknown> | undefined): Stra
   return "unknown";
 }
 
-function decisionAction(signal: number): "BUY" | "SELL" | "HOLD" {
-  if (signal > 0) return "BUY";
-  if (signal < 0) return "SELL";
-  return "HOLD";
+function humanizeReason(reason: string): string {
+  const normalized = reason.trim().toLowerCase();
+  if (!normalized || normalized === "final") return "신호 충족";
+  const map: Record<string, string> = {
+    risk_hold: "리스크 보호모드",
+    lag_hold: "데이터 지연 보호",
+    entry_filter: "진입 필터",
+    entry_filter_fail: "진입 필터",
+    time_window: "시간 조건 미충족",
+    time_block: "시간 조건 미충족",
+    stale_data: "데이터 신선도 부족",
+  };
+  const parts = normalized.split(",").map((v) => v.trim()).filter(Boolean);
+  const rendered = parts.map((part) => map[part] ?? part.replaceAll("_", " "));
+  return rendered.join(", ");
+}
+
+function toDirection(signal: number): DecisionRow["direction"] {
+  if (signal > 0) return "LONG";
+  if (signal < 0) return "SHORT";
+  return "NONE";
+}
+
+function toDecisionResult(params: {
+  finalSignal: number;
+  prevPos: number;
+  positionAfter: number;
+  reasons: string[];
+}): DecisionRow["result"] {
+  const { finalSignal, prevPos, positionAfter, reasons } = params;
+  if (finalSignal === 0) {
+    if (prevPos !== 0 && positionAfter === 0) return "EXIT";
+    if (reasons.length > 0) return "NO_ENTRY";
+    return "SKIP";
+  }
+  if (prevPos === 0 && positionAfter !== 0) return "ENTRY";
+  if (prevPos !== 0 && positionAfter === 0) return "EXIT";
+  if (prevPos !== 0 && Math.sign(prevPos) !== Math.sign(positionAfter)) return "ENTRY";
+  return reasons.length > 0 ? "NO_ENTRY" : "SKIP";
+}
+
+function pickRiskRatio(row: Record<string, unknown>): number | null {
+  const candidates = [row.risk_ratio, row.dyn_ratio, row.size_ratio, row.position_ratio];
+  for (const candidate of candidates) {
+    const n = parseNum(candidate as string | number);
+    if (n > 0 && n <= 1) return n;
+  }
+  return null;
 }
 
 function buildExecutionDiagnosticsFromActivity(rows: Record<string, unknown>[]): DashboardPayload["executionDiagnostics"] {
@@ -299,38 +343,85 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
     };
   });
 
-  const eventDrivenDecisions: DecisionRow[] = eventActivityRaw
-    .flatMap((r) => {
-      const ts = String(r.ts ?? r.bar_ts ?? "");
-      const status = String(r.status ?? "");
-      if (!ts || (status !== "executed" && status !== "skipped" && status !== "rejected")) return [];
-      const row: DecisionRow = {
-        ts,
-        profile: "EVT",
-        signal: 0,
-        action: status === "executed" ? "EXECUTED" : status === "rejected" ? "REJECTED" : "SKIPPED",
-        reason: status === "executed" ? "event_5m_trigger" : String(r.reason ?? "unknown"),
-      };
-      return [row];
-    })
-    .sort((a, b) => (new Date(a.ts).getTime() > new Date(b.ts).getTime() ? -1 : 1))
-    .slice(0, 20);
+  const openRatioByProfile = new Map<string, number>();
+  profiles.forEach((profile, idx) => {
+    const ratios = (tradesByProfile[idx] ?? [])
+      .filter((row) => String(row.event ?? "") === "open")
+      .map((row) => {
+        const amount = parseNum(row.qty as string | number) * parseNum(row.price as string | number);
+        const equity = parseNum(row.cash as string | number);
+        return equity > 0 ? amount / equity : 0;
+      })
+      .filter((ratio) => ratio > 0 && Number.isFinite(ratio));
 
-  const legacyDecisions: DecisionRow[] = decisionsByProfile
-    .flatMap((rows, idx) =>
-      rows.map((r) => ({
-        ts: String(r.ts ?? ""),
-        profile: profiles[idx],
-        signal: parseNum(r.final_signal as string | number),
-        action: decisionAction(parseNum(r.final_signal as string | number)),
-        reason: Array.isArray(r.block_reasons) && r.block_reasons.length > 0 ? String((r.block_reasons as unknown[]).join(",")) : "final",
-      })),
-    )
+    if (!ratios.length) return;
+    ratios.sort((a, b) => a - b);
+    openRatioByProfile.set(profile, ratios[Math.floor(ratios.length / 2)]);
+  });
+
+  const tradeIndex = new Map<string, Record<string, unknown>>();
+  profiles.forEach((profile, idx) => {
+    for (const trade of tradesByProfile[idx] ?? []) {
+      const ts = String(trade.ts ?? "");
+      if (!ts) continue;
+      tradeIndex.set(`${profile}:${ts}`, trade);
+    }
+  });
+
+  const traderDecisions: DecisionRow[] = decisionsByProfile
+    .flatMap((rows, idx) => {
+      const profile = profiles[idx];
+      let prevPos = 0;
+      return rows.map((raw) => {
+        const ts = String(raw.ts ?? "");
+        const finalSignal = parseNum(raw.final_signal as string | number);
+        const positionAfter = parseNum(raw.position_after as string | number);
+        const reasons = Array.isArray(raw.block_reasons)
+          ? (raw.block_reasons as unknown[]).map((v) => String(v)).filter(Boolean)
+          : [];
+
+        const trade = tradeIndex.get(`${profile}:${ts}`);
+        const actualAmount = trade ? parseNum(trade.qty as string | number) * parseNum(trade.price as string | number) : 0;
+        const equity = parseNum((trade?.cash as string | number) ?? (stateEntries[idx]?.day_start_cash as string | number) ?? 0);
+        const ratio = pickRiskRatio(raw) ?? openRatioByProfile.get(profile) ?? null;
+        const estimatedAmount = ratio !== null && equity > 0 ? equity * ratio : 0;
+        const amountKrw = actualAmount > 0 ? actualAmount : estimatedAmount > 0 ? estimatedAmount : null;
+        const amountIsEstimated = !(actualAmount > 0) && amountKrw !== null;
+        const sizePct = amountKrw !== null && equity > 0 ? (amountKrw / equity) * 100 : ratio !== null ? ratio * 100 : null;
+
+        const row: DecisionRow = {
+          ts,
+          profile,
+          direction: toDirection(finalSignal),
+          result: toDecisionResult({ finalSignal, prevPos, positionAfter, reasons }),
+          reason: humanizeReason(reasons.length > 0 ? reasons.join(",") : "final"),
+          sizePct,
+          amountKrw,
+          amountIsEstimated,
+        };
+
+        prevPos = positionAfter;
+        return row;
+      });
+    })
     .filter((d) => d.ts)
     .sort((a, b) => (new Date(a.ts).getTime() > new Date(b.ts).getTime() ? -1 : 1))
     .slice(0, 20);
 
-  const mergedDecisions: DecisionRow[] = eventDrivenDecisions.length > 0 ? eventDrivenDecisions : legacyDecisions;
+  const systemLogs: SystemLogRow[] = eventActivityRaw
+    .flatMap((r) => {
+      const ts = String(r.ts ?? r.bar_ts ?? "");
+      const status = String(r.status ?? "").toLowerCase();
+      if (!ts || (status !== "executed" && status !== "skipped" && status !== "rejected")) return [];
+      return [{
+        ts,
+        source: "EVT" as const,
+        status: (status as SystemLogRow["status"]),
+        reason: status === "executed" ? "event_5m_trigger" : String(r.reason ?? "unknown"),
+      }];
+    })
+    .sort((a, b) => (new Date(a.ts).getTime() > new Date(b.ts).getTime() ? -1 : 1))
+    .slice(0, 60);
 
   const opsAlerts: AlertRow[] = opsAlertsRaw
     .map((a) => ({
@@ -400,7 +491,8 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
       decisionLatestTs: latestDecisionMs > 0 ? new Date(latestDecisionMs).toISOString() : null,
     },
     strategies,
-    decisions: mergedDecisions,
+    decisions: traderDecisions,
+    systemLogs,
     executionDiagnostics,
     alerts: {
       ops: opsAlerts,
