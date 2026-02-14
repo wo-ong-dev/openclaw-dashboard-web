@@ -1,0 +1,5 @@
+# sync target directory for standalone dashboard-web repo
+# keep folder in monorepo, but ignore synced app content by default
+*
+!.gitignore
+!.README.md
