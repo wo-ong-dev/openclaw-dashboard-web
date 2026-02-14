@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { AlertRow, CandlePoint, DashboardPayload, DecisionRow, StrategyCard } from "@/lib/types";
 
+const SNAPSHOT_SCHEMA_VERSION = "dashboard.v2";
+
 const DEFAULT_OUTPUTS_DIR = path.resolve(process.cwd(), "../outputs");
 const DEFAULT_LIVE_DATA_DIR = path.resolve(process.cwd(), "../data/live");
 
@@ -278,6 +280,7 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
       };
 
   return {
+    snapshotSchemaVersion: SNAPSHOT_SCHEMA_VERSION,
     symbol: "KRW-BTC",
     updatedAt: new Date().toISOString(),
     market: {

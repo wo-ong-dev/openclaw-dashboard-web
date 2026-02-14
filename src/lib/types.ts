@@ -41,6 +41,7 @@ export type AlertRow = {
 };
 
 export type DashboardPayload = {
+  snapshotSchemaVersion: string;
   symbol: string;
   updatedAt: string;
   market: {
