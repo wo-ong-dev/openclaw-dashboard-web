@@ -390,13 +390,13 @@ function deriveRiskBanner(data: DashboardPayload | null): {
   if (!data) return null;
 
   const alerts = [...(data.alerts.ops ?? []), ...(data.alerts.performance ?? [])];
-  const diagnosticsAny = data.executionDiagnostics as DashboardPayload["executionDiagnostics"] & {
+  const diagnosticsAny = ((data.executionDiagnostics ?? {}) as DashboardPayload["executionDiagnostics"] & {
     risk_hold?: boolean;
     ws_stalled?: boolean;
     event_stalled?: boolean;
     runtime_down?: boolean;
     flags?: Record<string, boolean | number | string>;
-  };
+  });
 
   const warningDetails = new Set<string>();
   const criticalDetails = new Set<string>();
