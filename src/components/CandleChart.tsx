@@ -103,6 +103,7 @@ export function CandleChart({ data }: Props) {
       localization: {
         locale: "ko-KR",
         timeFormatter: (time: Time) => formatTooltipKst(toDateFromChartTime(time)),
+        priceFormatter: (price: number) => Math.round(price).toLocaleString("ko-KR"),
       },
       width: ref.current.clientWidth,
       height: 440,
@@ -143,6 +144,7 @@ export function CandleChart({ data }: Props) {
       borderVisible: false,
       wickUpColor: "#22c55e",
       wickDownColor: "#ef4444",
+      priceFormat: { type: "price", precision: 0, minMove: 1 },
     });
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
