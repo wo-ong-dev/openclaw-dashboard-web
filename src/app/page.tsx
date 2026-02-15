@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CandleChart } from "@/components/CandleChart";
-import { AlertRow, DashboardPayload, StrategyCard } from "@/lib/types";
+import { DashboardPayload, StrategyCard } from "@/lib/types";
 import { formatKstDateTime, formatRelativeFromNow, freshnessTone } from "@/lib/time";
 
-function fmt(n: number | null | undefined, digits = 2) {
+function fmt(n: number | null | undefined, digits = 0) {
   if (n === null || n === undefined || Number.isNaN(n)) return "-";
-  return n.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+  return n.toLocaleString("ko-KR", { minimumFractionDigits: 0, maximumFractionDigits: digits });
 }
 
 const POLL_MS = 7000;
@@ -116,11 +116,11 @@ export default function Home() {
                 </div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm w-full md:w-auto">
-                <Stat label="현재가" value={fmt(data?.market.lastPrice, 0)} />
-                <Stat label="24h 변동률" value={`${fmt(data?.market.changePct, 2)}%`} />
-                <Stat label="24h 고가" value={fmt(data?.market.high24h, 0)} />
-                <Stat label="24h 저가" value={fmt(data?.market.low24h, 0)} />
-                <Stat label="24h 거래량" value={fmt(data?.market.volume24h, 3)} />
+                <Stat label="현재가" value={fmt(data?.market.lastPrice)} />
+                <Stat label="24h 변동률" value={`${fmt(data?.market.changePct)}%`} />
+                <Stat label="24h 고가" value={fmt(data?.market.high24h)} />
+                <Stat label="24h 저가" value={fmt(data?.market.low24h)} />
+                <Stat label="24h 거래량" value={fmt(data?.market.volume24h)} />
               </div>
             </div>
             {error ? <InlineState kind="error" message={`데이터 갱신 오류: ${error}`} /> : null}
@@ -189,8 +189,8 @@ export default function Home() {
             </aside>
           </section>
 
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 rounded-xl border border-slate-800 bg-[#0b1220] p-4">
+          <section className="grid grid-cols-1 gap-4">
+            <div className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <SectionTitle title="최근 의사결정" subtitle="최신 20건 · KST" />
                 <ExecutionBadge
@@ -208,7 +208,6 @@ export default function Home() {
                     <thead className="text-slate-400">
                       <tr>
                         <th className="text-left py-1">시간 (KST)</th>
-                        <th className="text-left py-1">프로필</th>
                         <th className="text-left py-1">방향</th>
                         <th className="text-left py-1">결정 결과</th>
                         <th className="text-left py-1">핵심 사유</th>
@@ -220,12 +219,11 @@ export default function Home() {
                       {(data?.decisions ?? []).map((d, i) => (
                         <tr key={`${d.ts}-${d.profile}-${i}`} className="border-t border-slate-900/90 align-top">
                           <td className="py-1 pr-2 text-slate-300">{formatKstDateTime(d.ts)}</td>
-                          <td className="py-1 pr-2">{d.profile}</td>
                           <td className="py-1 pr-2">{directionLabel(d.direction)}</td>
                           <td className="py-1 pr-2">{resultLabel(d.result)}</td>
-                          <td className="py-1 truncate max-w-[220px] text-slate-300" title={d.reason}>{d.reason}</td>
-                          <td className="py-1 pr-2">{d.sizePct === null ? "-" : `${fmt(d.sizePct, 2)}%`}</td>
-                          <td className="py-1 pr-2 text-slate-300">{d.amountKrw === null ? "-" : `${fmt(d.amountKrw, 0)} KRW${d.amountIsEstimated ? " (추정)" : ""}`}</td>
+                          <td className="py-1 truncate max-w-[220px] text-slate-300" title={d.reason}>{humanizeDecisionReason(d.reason)}</td>
+                          <td className="py-1 pr-2">{d.sizePct === null ? "-" : `${fmt(d.sizePct)}%`}</td>
+                          <td className="py-1 pr-2 text-slate-300">{d.amountKrw === null ? "-" : `${fmt(d.amountKrw)} KRW${d.amountIsEstimated ? " (추정)" : ""}`}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -265,10 +263,6 @@ export default function Home() {
             </div>
             </div>
 
-            <div className="space-y-3">
-              <AlertPanel title="운영 알림" items={data?.alerts.ops ?? []} nowMs={nowMs} />
-              <AlertPanel title="성과 알림" items={data?.alerts.performance ?? []} nowMs={nowMs} />
-            </div>
           </section>
         </div>
       </main>
@@ -287,7 +281,7 @@ function FreshnessPanel({ data }: { data: DashboardPayload | null }) {
         ? "text-amber-300 border-amber-700/60 bg-amber-950/30"
         : "text-emerald-300 border-emerald-700/60 bg-emerald-950/30";
 
-  const lag = (sec: number | null) => (sec === null ? "-" : `${fmt(sec, 0)}s`);
+  const lag = (sec: number | null) => (sec === null ? "-" : `${fmt(sec)}s`);
 
   return (
     <section className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
@@ -351,20 +345,20 @@ function StrategyCompareCard({ summary }: { summary: StrategyCompareSummary | nu
         <div className="rounded-lg bg-slate-900/40 px-3 py-2">
           <p className="text-[11px] text-slate-400">최근 24h 스냅샷</p>
           <p className={`font-semibold ${leaderTone}`}>
-            전략 {summary.leader.profile} · {fmt(summary.leader.recentPnl24hPct, 3)}% ({fmt(summary.leader.recentPnl24hKrw, 0)} KRW)
+            전략 {summary.leader.profile} · {fmt(summary.leader.recentPnl24hPct)}% ({fmt(summary.leader.recentPnl24hKrw)} KRW)
           </p>
           <p className="text-[11px] text-slate-400">24h 청산 {summary.leader.recentTrades24h}건</p>
         </div>
         <div className="rounded-lg bg-slate-900/40 px-3 py-2">
           <p className="text-[11px] text-slate-400">누적 성과</p>
-          <p className="font-semibold text-slate-100">전략 {summary.leader.profile} · {fmt(summary.leader.realizedPnlPct, 3)}%</p>
+          <p className="font-semibold text-slate-100">전략 {summary.leader.profile} · {fmt(summary.leader.realizedPnlPct)}%</p>
         </div>
         <div className="rounded-lg bg-slate-900/40 px-3 py-2">
           <p className="text-[11px] text-slate-400">MDD 비교</p>
           <p className="font-semibold text-slate-100">
-            최고 방어 전략 {summary.mddBest.profile} ({fmt(summary.mddBest.mddPct, 3)}%) vs 약한 전략 {summary.mddWorst.profile} ({fmt(summary.mddWorst.mddPct, 3)}%)
+            최고 방어 전략 {summary.mddBest.profile} ({fmt(summary.mddBest.mddPct)}%) vs 약한 전략 {summary.mddWorst.profile} ({fmt(summary.mddWorst.mddPct)}%)
           </p>
-          <p className="text-[11px] text-slate-400">격차 {fmt(mddGap, 3)}%p</p>
+          <p className="text-[11px] text-slate-400">격차 {fmt(mddGap)}%p</p>
         </div>
       </div>
     </section>
@@ -392,17 +386,17 @@ function StrategyStatusCard({ strategy }: { strategy: StrategyCard }) {
       <div className="mb-3 grid grid-cols-2 gap-2 md:gap-3">
         <div className="rounded-lg bg-slate-900/40 px-3 py-2.5">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">손익 (KRW)</p>
-          <p className={`mt-1 text-lg md:text-base font-semibold leading-none ${pnlTone}`}>{fmt(strategy.realizedPnlKrw, 0)}</p>
+          <p className={`mt-1 text-lg md:text-base font-semibold leading-none ${pnlTone}`}>{fmt(strategy.realizedPnlKrw)}</p>
         </div>
         <div className="rounded-lg bg-slate-900/40 px-3 py-2.5">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">손익 (%)</p>
-          <p className={`mt-1 text-lg md:text-base font-semibold leading-none ${pnlTone}`}>{fmt(strategy.realizedPnlPct, 3)}%</p>
+          <p className={`mt-1 text-lg md:text-base font-semibold leading-none ${pnlTone}`}>{fmt(strategy.realizedPnlPct)}%</p>
         </div>
       </div>
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs md:text-xs">
-        <StatRow label="승률" value={`${fmt(strategy.winRate, 2)}%`} />
-        <StatRow label="MDD" value={`${fmt(strategy.mddPct, 3)}%`} />
+        <StatRow label="승률" value={`${fmt(strategy.winRate)}%`} />
+        <StatRow label="MDD" value={`${fmt(strategy.mddPct)}%`} />
         <StatRow label="거래 수" value={`${strategy.tradesClosed}`} />
         <StatRow label="최근 판단" value={formatKstDateTime(strategy.lastDecisionTs)} />
       </dl>
@@ -584,6 +578,29 @@ function resultLabel(result: DashboardPayload["decisions"][number]["result"]) {
   return "스킵";
 }
 
+function humanizeDecisionReason(reason: string) {
+  const raw = (reason ?? "").trim();
+  if (!raw) return "사유 없음";
+
+  const normalized = raw.toLowerCase();
+  const rules: Array<[RegExp, string]> = [
+    [/risk[_\s-]?hold|risk off/, "리스크 관리로 진입 보류"],
+    [/ws[_\s-]?stalled|event[_\s-]?stalled|runtime[_\s-]?down/, "시스템 지연/중단으로 대기"],
+    [/weak[_\s-]?signal|low[_\s-]?confidence|filter/, "신호가 약해서 관망"],
+    [/no[_\s-]?signal|neutral|flat/, "뚜렷한 신호가 없어 대기"],
+    [/already[_\s-]?in[_\s-]?position|position[_\s-]?exists/, "기존 포지션 유지"],
+    [/take[_\s-]?profit|tp/, "목표 수익 도달로 정리"],
+    [/stop[_\s-]?loss|sl/, "손실 제한 규칙으로 정리"],
+    [/volatility|whipsaw/, "변동성이 커서 보수적으로 대기"],
+  ];
+
+  for (const [pattern, label] of rules) {
+    if (pattern.test(normalized)) return label;
+  }
+
+  return raw.length > 24 ? `${raw.slice(0, 24)}…` : raw;
+}
+
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="mb-3">
@@ -638,29 +655,3 @@ function ExecutionBadge({ executed, expected, skipped, rejected }: { executed: n
   );
 }
 
-function AlertPanel({ title, items, nowMs }: { title: string; items: AlertRow[]; nowMs: number }) {
-  return (
-    <div className="rounded-xl border border-slate-800 bg-[#0b1220] p-3">
-      <SectionTitle title={title} subtitle="타임스탬프/상대시간 모두 KST 기준" />
-      {items.length === 0 ? (
-        <PanelState kind="empty" message="새 알림이 없습니다." />
-      ) : (
-        <ul className="space-y-2 max-h-32 overflow-auto text-xs">
-          {items.map((a, i) => (
-            <li key={`${a.ts}-${i}`} className="border-l-2 border-slate-700 pl-2">
-              <div className="flex items-center gap-2">
-                <span className="text-slate-300">{formatKstDateTime(a.ts)}</span>
-                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300" title={formatKstDateTime(a.ts)}>
-                  {formatRelativeFromNow(a.ts, nowMs)}
-                </span>
-              </div>
-              <p className="text-slate-200">
-                [{a.severity}] {a.message}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
