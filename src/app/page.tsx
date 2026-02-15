@@ -148,7 +148,7 @@ export default function Home() {
                 <Stat label="24h 변동률" value={`${fmt(data?.market.changePct)}%`} />
                 <Stat label="24h 고가" value={fmt(data?.market.high24h)} />
                 <Stat label="24h 저가" value={fmt(data?.market.low24h)} />
-                <Stat label="24h 거래량" value={fmt(data?.market.volume24h)} />
+                <Stat label="24h 거래량 (시장, BTC)" value={fmt(data?.market.volume24h)} />
               </div>
             </div>
             {error ? <InlineState kind="error" message={`데이터 갱신 오류: ${error}`} /> : null}
