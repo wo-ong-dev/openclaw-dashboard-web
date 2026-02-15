@@ -21,6 +21,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [mobileStrategy, setMobileStrategy] = useState<"A" | "B" | "C">("A");
+  const [decisionProfileFilter, setDecisionProfileFilter] = useState<"ALL" | "A" | "B" | "C">("ALL");
   const [dismissedSignature, setDismissedSignature] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,6 +83,12 @@ export default function Home() {
   const strategies = data?.strategies ?? [];
   const mobileStrategyCard = strategies.find((s) => s.profile === mobileStrategy) ?? strategies[0] ?? null;
   const strategySummary = useMemo(() => deriveStrategyCompareSummary(strategies), [strategies]);
+  const filteredDecisions = useMemo(() => {
+    const all = data?.decisions ?? [];
+    if (decisionProfileFilter === "ALL") return all;
+    return all.filter((d) => d.profile === decisionProfileFilter);
+  }, [data?.decisions, decisionProfileFilter]);
+  const decisionSubtitle = `최신 ${filteredDecisions.length}건 · KST${decisionProfileFilter === "ALL" ? "" : ` · 전략 ${decisionProfileFilter}`}`;
   const candleMeta = data?.candleSource;
   const candleSubtitle = candleMeta
     ? `${candleMeta.selectedTimeframe} 캔들 · 소스 ${candleMeta.selectedSourceFile} · 마지막 캔들 ${formatKstDateTime(candleMeta.lastCandleTs)} · 축/툴팁 시간 KST`
@@ -191,17 +198,33 @@ export default function Home() {
 
           <section className="grid grid-cols-1 gap-4">
             <div className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <SectionTitle title="최근 의사결정" subtitle="최신 20건 · KST" />
-                <ExecutionBadge
-                  executed={data?.executionDiagnostics?.executed_decisions ?? 0}
-                  expected={data?.executionDiagnostics?.last60m_expected ?? 12}
-                  skipped={data?.executionDiagnostics?.skipped_total ?? 0}
-                  rejected={data?.executionDiagnostics?.rejected_total ?? 0}
-                />
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <SectionTitle title="최근 의사결정" subtitle={decisionSubtitle} />
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-lg border border-slate-700/70 bg-slate-900/50 p-1 text-[11px]">
+                    {(["ALL", "A", "B", "C"] as const).map((profile) => (
+                      <button
+                        key={profile}
+                        type="button"
+                        onClick={() => setDecisionProfileFilter(profile)}
+                        className={`rounded px-2 py-1 font-semibold transition ${
+                          decisionProfileFilter === profile ? "bg-sky-500/20 text-sky-200" : "text-slate-300 hover:bg-slate-800/70"
+                        }`}
+                      >
+                        {profile === "ALL" ? "전체" : `전략 ${profile}`}
+                      </button>
+                    ))}
+                  </div>
+                  <ExecutionBadge
+                    executed={data?.executionDiagnostics?.executed_decisions ?? 0}
+                    expected={data?.executionDiagnostics?.last60m_expected ?? 12}
+                    skipped={data?.executionDiagnostics?.skipped_total ?? 0}
+                    rejected={data?.executionDiagnostics?.rejected_total ?? 0}
+                  />
+                </div>
               </div>
-              {(data?.decisions ?? []).length === 0 ? (
-                <PanelState kind="empty" message="최근 의사결정 기록이 없습니다." />
+              {filteredDecisions.length === 0 ? (
+                <PanelState kind="empty" message="선택한 전략의 최근 의사결정 기록이 없습니다." />
               ) : (
                 <div className="max-h-64 overflow-auto text-xs">
                   <table className="w-full">
@@ -216,7 +239,7 @@ export default function Home() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(data?.decisions ?? []).map((d, i) => (
+                      {filteredDecisions.map((d, i) => (
                         <tr key={`${d.ts}-${d.profile}-${i}`} className="border-t border-slate-900/90 align-top">
                           <td className="py-1 pr-2 text-slate-300">{formatKstDateTime(d.ts)}</td>
                           <td className="py-1 pr-2">{directionLabel(d.direction)}</td>
