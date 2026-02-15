@@ -237,17 +237,57 @@ function humanizeReason(reason: string): string {
   const normalized = reason.trim().toLowerCase();
   if (!normalized || normalized === "final") return "신호 충족";
   const map: Record<string, string> = {
-    risk_hold: "리스크 보호모드",
-    lag_hold: "데이터 지연 보호",
-    entry_filter: "진입 필터",
-    entry_filter_fail: "진입 필터",
-    time_window: "시간 조건 미충족",
-    time_block: "시간 조건 미충족",
+    risk_hold: "리스크 가드로 진입 보류",
+    lag_hold: "리스크 가드로 진입 보류",
+    entry_filter: "신규 진입 조건 미충족",
+    entry_filter_fail: "신규 진입 조건 미충족",
+    time_window: "신규 진입 조건 미충족",
+    time_block: "신규 진입 조건 미충족",
     stale_data: "데이터 신선도 부족",
+    duplicate_bar: "중복 봉 처리 방지",
+    stale_bar: "중복 봉 처리 방지",
   };
   const parts = normalized.split(",").map((v) => v.trim()).filter(Boolean);
   const rendered = parts.map((part) => map[part] ?? part.replaceAll("_", " "));
   return rendered.join(", ");
+}
+
+function isInfraReason(reason: string): boolean {
+  const normalized = reason.trim().toLowerCase();
+  if (!normalized) return false;
+  return [
+    "event_5m_trigger",
+    "executor_locked",
+    "internal_heartbeat",
+    "heartbeat",
+    "lock",
+    "stale_bar",
+    "duplicate_bar",
+    "already_processed_bar",
+    "ws_stalled",
+    "event_stalled",
+    "runtime_down",
+    "lag_hold",
+  ].includes(normalized);
+}
+
+function fallbackDecisionReason(rawReasons: string[]): string {
+  const normalized = rawReasons.map((v) => v.trim().toLowerCase());
+  if (normalized.some((v) => ["stale_bar", "duplicate_bar", "already_processed_bar", "executor_locked", "event_5m_trigger"].includes(v))) {
+    return "중복 봉 처리 방지";
+  }
+  if (normalized.some((v) => ["risk_hold", "lag_hold", "ws_stalled", "event_stalled", "runtime_down"].includes(v))) {
+    return "리스크 가드로 진입 보류";
+  }
+  return "신규 진입 조건 미충족";
+}
+
+function toDecisionReason(rawReasons: string[], fallbackWhenEmpty: string): string {
+  const cleaned = rawReasons.map((v) => v.trim()).filter(Boolean);
+  const decisionReasons = cleaned.filter((v) => !isInfraReason(v));
+  if (decisionReasons.length > 0) return humanizeReason(decisionReasons.join(","));
+  if (cleaned.length > 0) return fallbackDecisionReason(cleaned);
+  return fallbackWhenEmpty;
 }
 
 function toDirection(signal: number): DecisionRow["direction"] {
@@ -444,12 +484,17 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
         const amountIsEstimated = !(actualAmount > 0) && amountKrw !== null;
         const sizePct = amountKrw !== null && equity > 0 ? (amountKrw / equity) * 100 : ratio !== null ? ratio * 100 : null;
 
+        const result = toDecisionResult({ finalSignal, prevPos, positionAfter, reasons });
         const row: DecisionRow = {
           ts,
           profile,
           direction: toDirection(finalSignal),
-          result: toDecisionResult({ finalSignal, prevPos, positionAfter, reasons }),
-          reason: humanizeReason(reasons.length > 0 ? reasons.join(",") : "final"),
+          result,
+          reason: result === "ENTRY"
+            ? toDecisionReason(reasons, "진입 신호 충족")
+            : result === "EXIT"
+              ? toDecisionReason(reasons, "청산 조건 충족")
+              : toDecisionReason(reasons, "신규 진입 조건 미충족"),
           sizePct,
           amountKrw,
           amountIsEstimated,
