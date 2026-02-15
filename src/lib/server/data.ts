@@ -441,7 +441,7 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
       qty: parseNum(st.qty as string | number),
       entry: parseNum(st.entry as string | number),
       cash: parseNum(st.cash as string | number),
-      realizedPnlKrw: parseNum(st.realized_pnl as string | number),
+      realizedPnlKrw: perf.realizedPnlKrw,
       realizedPnlPct: perf.realizedPnlPct,
       recentPnl24hKrw: recent.pnlKrw,
       recentPnl24hPct: baseCapital > 0 ? (recent.pnlKrw / baseCapital) * 100 : 0,
