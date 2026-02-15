@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Coin Trading Dashboard MVP",
+  title: "BTC 모의투자 대시보드_By Wo_ong",
   description: "Read-only exchange-style dashboard for local trading outputs",
 };
 

@@ -108,7 +108,7 @@ export default function Home() {
           <header className="rounded-xl border border-slate-800/90 bg-[#0b1220] p-4 md:p-5 shadow-sm shadow-black/20">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="space-y-2">
-                <h1 className="text-xl md:text-2xl font-semibold tracking-tight">{data?.symbol ?? "KRW-BTC"} 읽기 전용 대시보드</h1>
+                <h1 className="text-xl md:text-2xl font-semibold tracking-tight">BTC 모의투자 대시보드_By Wo_ong</h1>
                 <p className="text-xs md:text-sm text-slate-400">모든 시간은 KST(Asia/Seoul) 기준 · {POLL_MS / 1000}초마다 갱신</p>
                 <div className="flex items-center gap-2">
                   <FreshnessBadge tone={freshness} label={formatRelativeFromNow(updatedAt, nowMs)} />
