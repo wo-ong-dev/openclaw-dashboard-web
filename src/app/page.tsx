@@ -584,9 +584,11 @@ function humanizeDecisionReason(reason: string) {
 
   const normalized = raw.toLowerCase();
   const rules: Array<[RegExp, string]> = [
-    [/risk[_\s-]?hold|risk off/, "리스크 관리로 진입 보류"],
+    [/old[_\s-]?or[_\s-]?already[_\s-]?processed|already[_\s-]?processed/, "중복 봉 처리 방지"],
+    [/event[_\s-]?5m[_\s-]?trigger|trigger/, "신규 진입 조건 미충족"],
+    [/risk[_\s-]?hold|risk off/, "리스크 가드로 진입 보류"],
     [/ws[_\s-]?stalled|event[_\s-]?stalled|runtime[_\s-]?down/, "시스템 지연/중단으로 대기"],
-    [/weak[_\s-]?signal|low[_\s-]?confidence|filter/, "신호가 약해서 관망"],
+    [/weak[_\s-]?signal|low[_\s-]?confidence|filter/, "신규 진입 조건 미충족"],
     [/no[_\s-]?signal|neutral|flat/, "뚜렷한 신호가 없어 대기"],
     [/already[_\s-]?in[_\s-]?position|position[_\s-]?exists/, "기존 포지션 유지"],
     [/take[_\s-]?profit|tp/, "목표 수익 도달로 정리"],
