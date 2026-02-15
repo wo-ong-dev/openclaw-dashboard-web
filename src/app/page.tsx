@@ -390,7 +390,7 @@ function StrategyStatusCard({ strategy }: { strategy: StrategyCard }) {
         </div>
         <div className="rounded-lg bg-slate-900/40 px-3 py-2.5">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">손익 (%)</p>
-          <p className={`mt-1 text-lg md:text-base font-semibold leading-none ${pnlTone}`}>{fmt(strategy.realizedPnlPct)}%</p>
+          <p className={`mt-1 text-lg md:text-base font-semibold leading-none ${pnlTone}`}>{fmt(strategy.realizedPnlPct, 2)}%</p>
         </div>
       </div>
 
