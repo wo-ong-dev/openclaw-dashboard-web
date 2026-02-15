@@ -34,6 +34,7 @@ export type DecisionRow = {
   sizePct: number | null;
   amountKrw: number | null;
   amountIsEstimated: boolean;
+  closePnlKrw: number | null;
 };
 
 export type SystemLogRow = {

@@ -501,6 +501,7 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
         const sizePct = amountKrw !== null && equity > 0 ? (amountKrw / equity) * 100 : ratio !== null ? ratio * 100 : null;
 
         const result = toDecisionResult({ finalSignal, prevPos, positionAfter, reasons });
+        const closePnlKrw = trade && String(trade.event ?? "") === "close" ? parseNum(trade.pnl as string | number) : null;
         const row: DecisionRow = {
           ts,
           profile,
@@ -514,6 +515,7 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
           sizePct,
           amountKrw,
           amountIsEstimated,
+          closePnlKrw,
         };
 
         prevPos = positionAfter;

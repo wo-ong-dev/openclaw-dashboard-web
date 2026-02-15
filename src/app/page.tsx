@@ -253,22 +253,28 @@ export default function Home() {
                     <thead className="text-slate-400">
                       <tr>
                         <th className="text-left py-1">시간 (KST)</th>
+                        <th className="text-left py-1">전략</th>
                         <th className="text-left py-1">방향</th>
                         <th className="text-left py-1">결정 결과</th>
                         <th className="text-left py-1">핵심 사유</th>
                         <th className="text-left py-1">투자 비중</th>
                         <th className="text-left py-1">투입금액</th>
+                        <th className="text-left py-1">청산손익</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredDecisions.map((d, i) => (
                         <tr key={`${d.ts}-${d.profile}-${i}`} className="border-t border-slate-900/90 align-top">
                           <td className="py-1 pr-2 text-slate-300">{formatKstDateTime(d.ts)}</td>
+                          <td className="py-1 pr-2 text-slate-200">전략 {d.profile}</td>
                           <td className="py-1 pr-2">{directionLabel(d.direction)}</td>
                           <td className="py-1 pr-2">{resultLabel(d.result)}</td>
                           <td className="py-1 truncate max-w-[220px] text-slate-300" title={d.reason}>{humanizeDecisionReason(d.reason)}</td>
                           <td className="py-1 pr-2">{d.sizePct === null ? "-" : `${fmt(d.sizePct)}%`}</td>
                           <td className="py-1 pr-2 text-slate-300">{d.amountKrw === null ? "-" : `${fmt(d.amountKrw)} KRW${d.amountIsEstimated ? " (추정)" : ""}`}</td>
+                          <td className={`py-1 pr-2 ${d.closePnlKrw === null ? "text-slate-500" : d.closePnlKrw > 0 ? "text-emerald-300" : d.closePnlKrw < 0 ? "text-rose-300" : "text-slate-300"}`}>
+                            {d.closePnlKrw === null ? "-" : `${fmt(d.closePnlKrw)} KRW`}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
