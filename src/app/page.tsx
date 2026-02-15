@@ -205,11 +205,11 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="md:hidden">{mobileStrategyCard ? <StrategyStatusCard strategy={mobileStrategyCard} /> : null}</div>
+                  <div className="md:hidden">{mobileStrategyCard ? <StrategyStatusCard strategy={mobileStrategyCard} currentPrice={data?.market.lastPrice ?? null} /> : null}</div>
 
                   <div className="hidden md:block space-y-3">
                     {strategies.map((s) => (
-                      <StrategyStatusCard key={s.profile} strategy={s} />
+                      <StrategyStatusCard key={s.profile} strategy={s} currentPrice={data?.market.lastPrice ?? null} />
                     ))}
                   </div>
                 </>
@@ -410,11 +410,19 @@ function StrategyCompareCard({ summary }: { summary: StrategyCompareSummary | nu
   );
 }
 
-function StrategyStatusCard({ strategy }: { strategy: StrategyCard }) {
+function StrategyStatusCard({ strategy, currentPrice }: { strategy: StrategyCard; currentPrice: number | null }) {
   const position = getPositionMeta(strategy.position);
   const signal = getSignalMeta(strategy.signalQuality);
   const pnlPctValue = strategy.realizedPnlPct ?? 0;
   const pnlTone = pnlPctValue > 0 ? "text-emerald-300" : pnlPctValue < 0 ? "text-rose-300" : "text-slate-200";
+  const hasOpenPosition = strategy.position !== 0 && strategy.qty > 0 && (currentPrice ?? 0) > 0;
+  const positionAmountKrw = hasOpenPosition ? Math.abs(strategy.qty * (currentPrice ?? 0)) : null;
+  const unrealizedPnlKrw = hasOpenPosition
+    ? (strategy.position > 0 ? 1 : -1) * ((currentPrice ?? 0) - strategy.entry) * strategy.qty
+    : null;
+  const totalPnlKrw = strategy.realizedPnlKrw + (unrealizedPnlKrw ?? 0);
+  const unrealizedTone = (unrealizedPnlKrw ?? 0) > 0 ? "text-emerald-300" : (unrealizedPnlKrw ?? 0) < 0 ? "text-rose-300" : "text-slate-200";
+  const totalTone = totalPnlKrw > 0 ? "text-emerald-300" : totalPnlKrw < 0 ? "text-rose-300" : "text-slate-200";
 
   return (
     <article className="rounded-2xl border border-slate-700/70 bg-gradient-to-b from-[#111d31] to-[#0a1425] p-4 shadow-[0_8px_30px_rgba(0,0,0,0.25)]">
@@ -444,6 +452,9 @@ function StrategyStatusCard({ strategy }: { strategy: StrategyCard }) {
         <StatRow label="MDD" value={`${fmt(strategy.mddPct)}%`} />
         <StatRow label="거래 수" value={`${strategy.tradesClosed}`} />
         <StatRow label="최근 판단" value={formatKstDateTime(strategy.lastDecisionTs)} />
+        <StatRow label="현재 포지션 금액" value={positionAmountKrw === null ? "-" : `${fmt(positionAmountKrw)} KRW`} />
+        <StatRow label="현재 포지션 손익" value={unrealizedPnlKrw === null ? "-" : `${fmt(unrealizedPnlKrw)} KRW`} valueClassName={unrealizedTone} />
+        <StatRow label="합산 손익" value={`${fmt(totalPnlKrw)} KRW`} valueClassName={totalTone} />
       </dl>
 
       <div className="mt-3 border-t border-slate-700/60 pt-2">
@@ -582,11 +593,11 @@ function deriveRiskBanner(data: DashboardPayload | null): {
   };
 }
 
-function StatRow({ label, value }: { label: string; value: string }) {
+function StatRow({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
   return (
     <div className="flex items-center justify-between rounded-md bg-slate-900/30 px-2 py-1.5">
       <dt className="text-slate-400">{label}</dt>
-      <dd className="font-medium text-slate-200">{value}</dd>
+      <dd className={`font-medium ${valueClassName ?? "text-slate-200"}`}>{value}</dd>
     </div>
   );
 }
