@@ -55,6 +55,28 @@ function buildRecentTradeSnapshot(rows: Record<string, unknown>[], nowMs: number
   return { pnlKrw, trades };
 }
 
+function buildTradePerformance(rows: Record<string, unknown>[], initialCapital = 10_000_000) {
+  const closes = rows.filter((row) => String(row.event ?? "") === "close");
+  const pnls = closes.map((row) => parseNum(row.pnl as string | number));
+  const tradesClosed = pnls.length;
+  const wins = pnls.filter((p) => p > 0).length;
+  const realizedPnlKrw = pnls.reduce((acc, p) => acc + p, 0);
+  const realizedPnlPct = initialCapital > 0 ? (realizedPnlKrw / initialCapital) * 100 : 0;
+  const winRatePct = tradesClosed > 0 ? (wins / tradesClosed) * 100 : 0;
+
+  let equity = initialCapital;
+  let peak = initialCapital;
+  let mddPct = 0;
+  for (const pnl of pnls) {
+    equity += pnl;
+    if (equity > peak) peak = equity;
+    const ddPct = peak > 0 ? ((equity / peak) - 1) * 100 : 0;
+    if (ddPct < mddPct) mddPct = ddPct;
+  }
+
+  return { tradesClosed, winRatePct, realizedPnlPct, mddPct };
+}
+
 async function readCandlesFromCsv(fileName: string, limit = 240): Promise<CandlePoint[]> {
   const csv = await readTextSafe(path.join(liveDataDir, fileName));
   if (!csv) return [];
@@ -399,9 +421,7 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
   const opsAlertsRaw = await readJsonl(path.join(outputsDir, "alerts_ops.jsonl"), 30);
   const selfHealRows = await readJsonl(runtimeSelfHealFile, 500);
 
-  const performanceProfiles = new Map<string, Record<string, unknown>>(
-    (perfSummary.profiles ?? []).map((p) => [String(p.profile), p]),
-  );
+  // metrics are computed from trade logs (not perf snapshot)
 
   const nowMs = Date.now();
   const latestDecisionMs = latestDecisionTimelineMs(eventActivityRaw, decisionsByProfile);
@@ -411,9 +431,9 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
   const strategies: StrategyCard[] = profiles.map((profile, idx) => {
     const st = stateEntries[idx] ?? {};
     const lastDecision = decisionsByProfile[idx]?.at(-1);
-    const perf = performanceProfiles.get(profile) ?? {};
     const recent = buildRecentTradeSnapshot(tradesByProfile[idx] ?? [], nowMs);
     const baseCapital = parseNum(st.day_start_cash as string | number) || 10_000_000;
+    const perf = buildTradePerformance(tradesByProfile[idx] ?? [], 10_000_000);
 
     return {
       profile,
@@ -422,17 +442,13 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
       entry: parseNum(st.entry as string | number),
       cash: parseNum(st.cash as string | number),
       realizedPnlKrw: parseNum(st.realized_pnl as string | number),
-      realizedPnlPct: parseNum(perf.realized_pnl_pct as string | number),
+      realizedPnlPct: perf.realizedPnlPct,
       recentPnl24hKrw: recent.pnlKrw,
       recentPnl24hPct: baseCapital > 0 ? (recent.pnlKrw / baseCapital) * 100 : 0,
       recentTrades24h: recent.trades,
-      winRate:
-        perf.win_rate === undefined || perf.win_rate === null ? null : parseNum(perf.win_rate as string | number) * 100,
-      mddPct:
-        perf.max_drawdown_pct === undefined || perf.max_drawdown_pct === null
-          ? null
-          : parseNum(perf.max_drawdown_pct as string | number),
-      tradesClosed: parseNum(perf.trades_closed as string | number),
+      winRate: perf.tradesClosed > 0 ? perf.winRatePct : null,
+      mddPct: perf.tradesClosed > 0 ? perf.mddPct : null,
+      tradesClosed: perf.tradesClosed,
       signalQuality: signalQualityFromDecision(lastDecision),
       lastDecisionTs: (lastDecision?.ts as string) ?? null,
     };
