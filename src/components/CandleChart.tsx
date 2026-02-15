@@ -43,14 +43,11 @@ const kstHourMinuteFormatter = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
-const kstTooltipFormatter = new Intl.DateTimeFormat("en-CA", {
+const kstTooltipDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: KST_TIMEZONE,
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
-  hour12: false,
-  hour: "2-digit",
-  minute: "2-digit",
 });
 
 function dayKey(date: Date): string {
@@ -58,13 +55,15 @@ function dayKey(date: Date): string {
 }
 
 function formatTooltipKst(date: Date): string {
-  const parts = kstTooltipFormatter.formatToParts(date);
-  const year = parts.find((p) => p.type === "year")?.value ?? "----";
-  const month = parts.find((p) => p.type === "month")?.value ?? "--";
-  const day = parts.find((p) => p.type === "day")?.value ?? "--";
-  const hour = parts.find((p) => p.type === "hour")?.value ?? "--";
-  const minute = parts.find((p) => p.type === "minute")?.value ?? "--";
-  return `${year}/${month}/${day} ${hour}:${minute} KST`;
+  const timeLabel = kstTimeFormatter.format(date);
+  const dateLabel = kstTooltipDateFormatter.format(date).replaceAll("-", "/");
+  return `${timeLabel} · ${dateLabel} KST`;
+}
+
+function toDateFromChartTime(time: Time): Date {
+  if (typeof time === "number") return new Date(Number(time) * 1000);
+  if (typeof time === "string") return new Date(time);
+  return new Date(Date.UTC(time.year, time.month - 1, time.day));
 }
 
 function isKstMidnight(date: Date): boolean {
@@ -80,12 +79,17 @@ export function CandleChart({ data }: Props) {
   useEffect(() => {
     if (!ref.current) return;
 
-    const firstTs = data[0]?.time ?? 0;
-    const lastTs = data.at(-1)?.time ?? firstTs;
-    const daySpan = Math.max(0, Math.floor((lastTs - firstTs) / 86400));
     const nowKstKey = dayKey(new Date());
-    const showMoreDateTicks = daySpan >= 2;
     const isCompact = () => (ref.current?.clientWidth ?? 0) < 520;
+    const dayBoundaryTs = new Set<number>();
+    for (let i = 1; i < data.length; i += 1) {
+      const prev = data[i - 1];
+      const curr = data[i];
+      if (!prev || !curr) continue;
+      const prevKey = dayKey(new Date(prev.time * 1000));
+      const currKey = dayKey(new Date(curr.time * 1000));
+      if (prevKey !== currKey) dayBoundaryTs.add(curr.time);
+    }
 
     const chart = createChart(ref.current, {
       layout: {
@@ -98,15 +102,7 @@ export function CandleChart({ data }: Props) {
       },
       localization: {
         locale: "ko-KR",
-        timeFormatter: (time: Time) => {
-          const date =
-            typeof time === "number"
-              ? new Date(Number(time) * 1000)
-              : typeof time === "string"
-                ? new Date(time)
-                : new Date(Date.UTC(time.year, time.month - 1, time.day));
-          return formatTooltipKst(date);
-        },
+        timeFormatter: (time: Time) => formatTooltipKst(toDateFromChartTime(time)),
       },
       width: ref.current.clientWidth,
       height: 440,
@@ -115,19 +111,22 @@ export function CandleChart({ data }: Props) {
         borderColor: "#22324a",
         timeVisible: true,
         tickMarkFormatter: (time: UTCTimestamp, tickMarkType: TickMarkType) => {
-          const date = new Date(Number(time) * 1000);
+          const ts = Number(time);
+          const date = new Date(ts * 1000);
           const kstKey = dayKey(date);
           const todayTick = kstKey === nowKstKey;
 
-          if (tickMarkType === TickMarkType.Time || todayTick) {
-            return (isCompact() ? kstTimeCompactFormatter : kstTimeFormatter).format(date);
-          }
-
-          if (showMoreDateTicks || isKstMidnight(date)) {
+          if (dayBoundaryTs.has(ts) || (tickMarkType !== TickMarkType.Time && isKstMidnight(date))) {
             return kstDateFormatter.format(date);
           }
 
-          return "";
+          // 오늘 구간은 항상 시:분 우선 노출 (모바일은 compact)
+          if (todayTick || tickMarkType === TickMarkType.Time) {
+            return (isCompact() ? kstTimeCompactFormatter : kstTimeFormatter).format(date);
+          }
+
+          // 과거 구간도 날짜 라벨 남발 없이 시:분 우선
+          return (isCompact() ? kstTimeCompactFormatter : kstTimeFormatter).format(date);
         },
       },
     });
