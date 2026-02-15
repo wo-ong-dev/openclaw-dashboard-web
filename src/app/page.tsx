@@ -83,21 +83,32 @@ export default function Home() {
   const strategies = data?.strategies ?? [];
   const mobileStrategyCard = strategies.find((s) => s.profile === mobileStrategy) ?? strategies[0] ?? null;
   const strategySummary = useMemo(() => deriveStrategyCompareSummary(strategies), [strategies]);
-  const filteredDecisions = useMemo(() => {
+  const decisionFilterResult = useMemo(() => {
     const all = data?.decisions ?? [];
-    if (decisionProfileFilter === "ALL") return all;
+    if (decisionProfileFilter === "ALL") {
+      return { rows: all, hint: null as string | null };
+    }
 
-    const normalizeProfile = (value: unknown): "A" | "B" | "C" | null => {
-      const text = String(value ?? "").trim().toUpperCase();
-      if (text === "A" || text.endsWith(".A") || text.includes("_A") || text.includes("-A")) return "A";
-      if (text === "B" || text.endsWith(".B") || text.includes("_B") || text.includes("-B")) return "B";
-      if (text === "C" || text.endsWith(".C") || text.includes("_C") || text.includes("-C")) return "C";
-      const m = text.match(/[ABC]/);
-      return m ? (m[0] as "A" | "B" | "C") : null;
-    };
+    const exact = all.filter((d) => extractDecisionProfile(d) === decisionProfileFilter);
+    if (exact.length > 0) return { rows: exact, hint: null as string | null };
 
-    return all.filter((d) => normalizeProfile(d.profile) === decisionProfileFilter);
+    const inferred = all.filter((d) => inferDecisionProfile(d) === decisionProfileFilter);
+    if (inferred.length > 0) {
+      return {
+        rows: inferred,
+        hint: `프로필 필드가 비어 있어 사유/메타데이터에서 전략 ${decisionProfileFilter} 추정값으로 표시합니다.`,
+      };
+    }
+
+    const systemLevelCount = all.filter((d) => isSystemLevelDecision(d)).length;
+    const hint = systemLevelCount > 0
+      ? `현재 수신된 최근 의사결정 ${all.length}건은 EVT/시스템 로그 성격이라 전략 태그(A/B/C)가 없습니다.`
+      : null;
+
+    return { rows: [], hint };
   }, [data?.decisions, decisionProfileFilter]);
+
+  const filteredDecisions = decisionFilterResult.rows;
   const decisionSubtitle = `최신 ${filteredDecisions.length}건 · KST${decisionProfileFilter === "ALL" ? "" : ` · 전략 ${decisionProfileFilter}`}`;
   const candleMeta = data?.candleSource;
   const candleSubtitle = candleMeta
@@ -233,6 +244,7 @@ export default function Home() {
                   />
                 </div>
               </div>
+              {decisionFilterResult.hint ? <InlineState kind="loading" message={decisionFilterResult.hint} /> : null}
               {filteredDecisions.length === 0 ? (
                 <PanelState kind="empty" message="선택한 전략의 최근 의사결정 기록이 없습니다." />
               ) : (
@@ -596,6 +608,53 @@ function getSignalMeta(signal: StrategyCard["signalQuality"]) {
     default:
       return { activeKey: "", className: "border-slate-700 bg-slate-900/40 text-slate-400" } as const;
   }
+}
+
+function normalizeStrategyProfile(value: unknown): "A" | "B" | "C" | null {
+  const text = String(value ?? "").trim().toUpperCase();
+  if (!text) return null;
+  if (text === "A" || text.endsWith(".A") || text.includes("_A") || text.includes("-A") || text.includes("PROFILE_A") || text.includes("STRATEGY_A")) return "A";
+  if (text === "B" || text.endsWith(".B") || text.includes("_B") || text.includes("-B") || text.includes("PROFILE_B") || text.includes("STRATEGY_B")) return "B";
+  if (text === "C" || text.endsWith(".C") || text.includes("_C") || text.includes("-C") || text.includes("PROFILE_C") || text.includes("STRATEGY_C")) return "C";
+  return null;
+}
+
+function extractDecisionProfile(row: unknown): "A" | "B" | "C" | null {
+  const obj = (row ?? {}) as Record<string, unknown>;
+  return normalizeStrategyProfile(obj.profile ?? obj.strategy ?? obj.profileId ?? obj.profile_id ?? (obj.meta as Record<string, unknown> | undefined)?.profile);
+}
+
+function inferDecisionProfile(row: unknown): "A" | "B" | "C" | null {
+  const exact = extractDecisionProfile(row);
+  if (exact) return exact;
+
+  const obj = (row ?? {}) as Record<string, unknown>;
+  const candidates = [obj.reason, obj.action, obj.source, obj.message, obj.detail, JSON.stringify(obj.meta ?? {}), JSON.stringify(obj)];
+
+  const joined = candidates
+    .map((v) => String(v ?? "").toUpperCase())
+    .join(" | ");
+
+  const patterns: Array<["A" | "B" | "C", RegExp[]]> = [
+    ["A", [/PROFILE\s*[:=_-]?\s*A/, /STRATEGY\s*[:=_-]?\s*A/, /PAPER_DECISIONS\.A/, /PROFILES?[\]\["'\s:=_-]*A/]],
+    ["B", [/PROFILE\s*[:=_-]?\s*B/, /STRATEGY\s*[:=_-]?\s*B/, /PAPER_DECISIONS\.B/, /PROFILES?[\]\["'\s:=_-]*B/]],
+    ["C", [/PROFILE\s*[:=_-]?\s*C/, /STRATEGY\s*[:=_-]?\s*C/, /PAPER_DECISIONS\.C/, /PROFILES?[\]\["'\s:=_-]*C/]],
+  ];
+
+  for (const [profile, regexes] of patterns) {
+    if (regexes.some((re) => re.test(joined))) return profile;
+  }
+
+  return null;
+}
+
+function isSystemLevelDecision(row: unknown): boolean {
+  const obj = (row ?? {}) as Record<string, unknown>;
+  const profileText = String(obj.profile ?? "").toUpperCase();
+  if (profileText === "EVT" || profileText === "SYSTEM" || profileText === "INFRA") return true;
+
+  const source = `${String(obj.action ?? "")} ${String(obj.reason ?? "")} ${String(obj.status ?? "")}`.toLowerCase();
+  return ["event_5m_trigger", "executor_locked", "runtime_down", "ws_stalled", "event_stalled", "heartbeat"].some((token) => source.includes(token));
 }
 
 function directionLabel(direction: DashboardPayload["decisions"][number]["direction"]) {
