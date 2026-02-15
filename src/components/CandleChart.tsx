@@ -109,9 +109,11 @@ export function CandleChart({ data }: Props) {
       height: 440,
       rightPriceScale: { borderColor: "#22324a" },
       handleScale: {
+        mouseWheel: false,
+        pinch: false,
         axisPressedMouseMove: {
           price: false,
-          time: true,
+          time: false,
         },
       },
       timeScale: {
