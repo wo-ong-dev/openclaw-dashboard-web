@@ -86,7 +86,17 @@ export default function Home() {
   const filteredDecisions = useMemo(() => {
     const all = data?.decisions ?? [];
     if (decisionProfileFilter === "ALL") return all;
-    return all.filter((d) => d.profile === decisionProfileFilter);
+
+    const normalizeProfile = (value: unknown): "A" | "B" | "C" | null => {
+      const text = String(value ?? "").trim().toUpperCase();
+      if (text === "A" || text.endsWith(".A") || text.includes("_A") || text.includes("-A")) return "A";
+      if (text === "B" || text.endsWith(".B") || text.includes("_B") || text.includes("-B")) return "B";
+      if (text === "C" || text.endsWith(".C") || text.includes("_C") || text.includes("-C")) return "C";
+      const m = text.match(/[ABC]/);
+      return m ? (m[0] as "A" | "B" | "C") : null;
+    };
+
+    return all.filter((d) => normalizeProfile(d.profile) === decisionProfileFilter);
   }, [data?.decisions, decisionProfileFilter]);
   const decisionSubtitle = `최신 ${filteredDecisions.length}건 · KST${decisionProfileFilter === "ALL" ? "" : ` · 전략 ${decisionProfileFilter}`}`;
   const candleMeta = data?.candleSource;
