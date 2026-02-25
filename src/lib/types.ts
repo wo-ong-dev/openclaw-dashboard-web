@@ -75,6 +75,44 @@ export type FreshnessMeta = {
   policyState: "recovered" | "watch" | "degraded";
 };
 
+export type BinancePaperPayload = {
+  processes: {
+    ws_collector: boolean;
+    bar_close_runner: boolean;
+    event_executor: boolean;
+  };
+  ws_lag_sec: number | null;
+  current_price: number | null;
+  stats: {
+    trades: number;
+    pf: number | null;
+    win_rate_pct: number | null;
+    expectancy_bps: number | null;
+    max_drawdown_pct: number | null;
+    equity: number;
+  } | null;
+  open_positions: Array<{
+    trade_id: string;
+    side: string;
+    entry_price: number;
+    entry_bar_ts: string;
+    exit_bar_ts: string | null;
+    notional: number;
+  }>;
+  recent_trades: Array<{
+    trade_id: string;
+    side: string;
+    entry_price: number;
+    exit_price: number | null;
+    net_ret_bps: number | null;
+    pnl: number | null;
+    status: string;
+    entry_bar_ts: string;
+  }>;
+  candles: CandlePoint[];
+  updated_at: string;
+};
+
 export type DashboardPayload = {
   snapshotSchemaVersion: string;
   symbol: string;

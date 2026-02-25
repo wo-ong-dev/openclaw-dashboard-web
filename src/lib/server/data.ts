@@ -74,7 +74,7 @@ function buildTradePerformance(rows: Record<string, unknown>[], initialCapital =
     if (ddPct < mddPct) mddPct = ddPct;
   }
 
-  return { tradesClosed, winRatePct, realizedPnlPct, mddPct };
+  return { tradesClosed, winRatePct, realizedPnlKrw, realizedPnlPct, mddPct };
 }
 
 async function readCandlesFromCsv(fileName: string, limit = 240): Promise<CandlePoint[]> {
@@ -244,11 +244,38 @@ function calcFreshnessHealthScore(params: {
   return Math.max(0, Math.min(100, score));
 }
 
+function extractBlockReasons(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map((v) => String(v)).filter(Boolean);
+  if (typeof raw === "string" && raw.trim()) return [raw.trim()];
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw as Record<string, unknown>)
+      .filter(([, v]) => Boolean(v))
+      .map(([k]) => k);
+  }
+  return [];
+}
+
+function compactTopFactors(row: Record<string, unknown>): string | null {
+  const top = row.top_factors;
+  if (!Array.isArray(top) || top.length === 0) return null;
+  const chunks = top
+    .slice(0, 2)
+    .map((r) => {
+      if (!r || typeof r !== "object") return "";
+      const name = String((r as Record<string, unknown>).name ?? "").trim();
+      const score = parseNum((r as Record<string, unknown>).score as string | number);
+      if (!name) return "";
+      return `${name}:${score.toFixed(2)}`;
+    })
+    .filter(Boolean);
+  return chunks.length ? chunks.join("|") : null;
+}
+
 function signalQualityFromDecision(d: Record<string, unknown> | undefined): StrategyCard["signalQuality"] {
   if (!d) return "unknown";
   const finalSignal = parseNum((d.final_signal as string) ?? (d.final_signal as number));
   const baseSignal = parseNum((d.base_signal as string) ?? (d.base_signal as number));
-  const reasons = ((d.block_reasons as unknown[]) ?? []).length;
+  const reasons = extractBlockReasons(d.block_reasons).length;
   if (finalSignal !== 0) return "final";
   if (baseSignal !== 0 && reasons > 0) return "weak-filtered";
   if (baseSignal !== 0) return "strong";
@@ -487,9 +514,7 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
         const ts = String(raw.ts ?? "");
         const finalSignal = parseNum(raw.final_signal as string | number);
         const positionAfter = parseNum(raw.position_after as string | number);
-        const reasons = Array.isArray(raw.block_reasons)
-          ? (raw.block_reasons as unknown[]).map((v) => String(v)).filter(Boolean)
-          : [];
+        const reasons = extractBlockReasons(raw.block_reasons);
 
         const trade = tradeIndex.get(`${profile}:${ts}`);
         const actualAmount = trade ? parseNum(trade.qty as string | number) * parseNum(trade.price as string | number) : 0;
@@ -501,17 +526,22 @@ export async function getDashboardPayload(): Promise<DashboardPayload> {
         const sizePct = amountKrw !== null && equity > 0 ? (amountKrw / equity) * 100 : ratio !== null ? ratio * 100 : null;
 
         const result = toDecisionResult({ finalSignal, prevPos, positionAfter, reasons });
+        const topFactor = compactTopFactors(raw);
+        let decisionReason = result === "ENTRY"
+          ? toDecisionReason(reasons, "진입 신호 충족")
+          : result === "EXIT"
+            ? toDecisionReason(reasons, "청산 조건 충족")
+            : toDecisionReason(reasons, "신규 진입 조건 미충족");
+        if (topFactor) decisionReason = `${decisionReason} | top=${topFactor}`;
+
         const closePnlKrw = trade && String(trade.event ?? "") === "close" ? parseNum(trade.pnl as string | number) : null;
+
         const row: DecisionRow = {
           ts,
           profile,
           direction: toDirection(finalSignal),
           result,
-          reason: result === "ENTRY"
-            ? toDecisionReason(reasons, "진입 신호 충족")
-            : result === "EXIT"
-              ? toDecisionReason(reasons, "청산 조건 충족")
-              : toDecisionReason(reasons, "신규 진입 조건 미충족"),
+          reason: decisionReason,
           sizePct,
           amountKrw,
           amountIsEstimated,

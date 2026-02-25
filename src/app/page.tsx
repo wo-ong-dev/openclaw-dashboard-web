@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CandleChart } from "@/components/CandleChart";
-import { DashboardPayload, StrategyCard } from "@/lib/types";
+import { BinancePaperPayload, DashboardPayload, StrategyCard } from "@/lib/types";
 import { formatKstDateTime, formatRelativeFromNow, freshnessTone } from "@/lib/time";
 
 function fmt(n: number | null | undefined, digits = 0) {
@@ -11,11 +11,17 @@ function fmt(n: number | null | undefined, digits = 0) {
 }
 
 const POLL_MS = 7000;
+const BINANCE_PAPER_POLL_MS = 30_000;
 const EXTERNAL_API_BASE = process.env.NEXT_PUBLIC_DASHBOARD_API_BASE?.replace(/\/$/, "") ?? "";
 const DASHBOARD_API_URL = EXTERNAL_API_BASE ? `${EXTERNAL_API_BASE}/dashboard` : "/api/dashboard";
+const BINANCE_PAPER_ETH_API_URL = "/api/binance-paper?symbol=ETHUSDT";
+const BINANCE_PAPER_BTC_API_URL = "/api/binance-paper?symbol=BTCUSDT";
 const RISK_BANNER_DISMISS_KEY = "dashboard:risk-banner:dismissed-signature";
 
+type ActiveTab = "btc" | "eth";
+
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("btc");
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -64,6 +70,45 @@ export default function Home() {
     };
   }, []);
 
+  const [binancePaperEth, setBinancePaperEth] = useState<BinancePaperPayload | null>(null);
+  const [binancePaperEthError, setBinancePaperEthError] = useState<string | null>(null);
+  const [binancePaperBtc, setBinancePaperBtc] = useState<BinancePaperPayload | null>(null);
+  const [binancePaperBtcError, setBinancePaperBtcError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchEth = async () => {
+      try {
+        const res = await fetch(BINANCE_PAPER_ETH_API_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error(`binance-paper eth api error ${res.status}`);
+        const json = (await res.json()) as BinancePaperPayload;
+        if (mounted) { setBinancePaperEth(json); setBinancePaperEthError(null); }
+      } catch (e) {
+        if (mounted) setBinancePaperEthError(e instanceof Error ? e.message : "Unknown error");
+      }
+    };
+    fetchEth();
+    const id = setInterval(fetchEth, BINANCE_PAPER_POLL_MS);
+    return () => { mounted = false; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchBtc = async () => {
+      try {
+        const res = await fetch(BINANCE_PAPER_BTC_API_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error(`binance-paper btc api error ${res.status}`);
+        const json = (await res.json()) as BinancePaperPayload;
+        if (mounted) { setBinancePaperBtc(json); setBinancePaperBtcError(null); }
+      } catch (e) {
+        if (mounted) setBinancePaperBtcError(e instanceof Error ? e.message : "Unknown error");
+      }
+    };
+    fetchBtc();
+    const id = setInterval(fetchBtc, BINANCE_PAPER_POLL_MS);
+    return () => { mounted = false; clearInterval(id); };
+  }, []);
+
   const updatedAt = data?.updatedAt ?? null;
   const updated = useMemo(() => formatKstDateTime(updatedAt), [updatedAt]);
   const freshness = useMemo(() => freshnessTone(updatedAt, nowMs), [updatedAt, nowMs]);
@@ -83,32 +128,21 @@ export default function Home() {
   const strategies = data?.strategies ?? [];
   const mobileStrategyCard = strategies.find((s) => s.profile === mobileStrategy) ?? strategies[0] ?? null;
   const strategySummary = useMemo(() => deriveStrategyCompareSummary(strategies), [strategies]);
-  const decisionFilterResult = useMemo(() => {
+  const filteredDecisions = useMemo(() => {
     const all = data?.decisions ?? [];
-    if (decisionProfileFilter === "ALL") {
-      return { rows: all, hint: null as string | null };
-    }
+    if (decisionProfileFilter === "ALL") return all;
 
-    const exact = all.filter((d) => extractDecisionProfile(d) === decisionProfileFilter);
-    if (exact.length > 0) return { rows: exact, hint: null as string | null };
+    const normalizeProfile = (value: unknown): "A" | "B" | "C" | null => {
+      const text = String(value ?? "").trim().toUpperCase();
+      if (text === "A" || text.endsWith(".A") || text.includes("_A") || text.includes("-A")) return "A";
+      if (text === "B" || text.endsWith(".B") || text.includes("_B") || text.includes("-B")) return "B";
+      if (text === "C" || text.endsWith(".C") || text.includes("_C") || text.includes("-C")) return "C";
+      const m = text.match(/[ABC]/);
+      return m ? (m[0] as "A" | "B" | "C") : null;
+    };
 
-    const inferred = all.filter((d) => inferDecisionProfile(d) === decisionProfileFilter);
-    if (inferred.length > 0) {
-      return {
-        rows: inferred,
-        hint: `프로필 필드가 비어 있어 사유/메타데이터에서 전략 ${decisionProfileFilter} 추정값으로 표시합니다.`,
-      };
-    }
-
-    const systemLevelCount = all.filter((d) => isSystemLevelDecision(d)).length;
-    const hint = systemLevelCount > 0
-      ? `현재 수신된 최근 의사결정 ${all.length}건은 EVT/시스템 로그 성격이라 전략 태그(A/B/C)가 없습니다.`
-      : null;
-
-    return { rows: [], hint };
+    return all.filter((d) => normalizeProfile(d.profile) === decisionProfileFilter);
   }, [data?.decisions, decisionProfileFilter]);
-
-  const filteredDecisions = decisionFilterResult.rows;
   const decisionSubtitle = `최신 ${filteredDecisions.length}건 · KST${decisionProfileFilter === "ALL" ? "" : ` · 전략 ${decisionProfileFilter}`}`;
   const candleMeta = data?.candleSource;
   const candleSubtitle = candleMeta
@@ -131,7 +165,35 @@ export default function Home() {
         />
       ) : null}
 
-      <main className={`min-h-screen bg-[#050b14] text-slate-100 p-3 md:p-6 ${showRiskBanner ? "pt-20 md:pt-24" : "pt-4 md:pt-6"}`}>
+      <div className={`bg-[#050b14] sticky top-0 z-40 border-b border-slate-800/90 ${showRiskBanner ? "mt-14 md:mt-16" : ""}`}>
+        <div className="mx-auto max-w-[1600px] px-3 md:px-6">
+          <div className="inline-flex gap-1 py-2">
+            {(["btc", "eth"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === tab
+                    ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent"
+                }`}
+              >
+                {tab === "btc" ? "BTC 모의투자" : "ETH 모의투자"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {activeTab === "eth" ? (
+        <BinancePaperTab symbol="ETH" data={binancePaperEth} error={binancePaperEthError} nowMs={nowMs} />
+      ) : null}
+      {activeTab === "btc" ? (
+        <BinancePaperTab symbol="BTC" data={binancePaperBtc} error={binancePaperBtcError} nowMs={nowMs} />
+      ) : null}
+
+      <main className="hidden">
         <div className="mx-auto max-w-[1600px] space-y-5">
           <header className="rounded-xl border border-slate-800/90 bg-[#0b1220] p-4 md:p-5 shadow-sm shadow-black/20">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -244,7 +306,6 @@ export default function Home() {
                   />
                 </div>
               </div>
-              {decisionFilterResult.hint ? <InlineState kind="loading" message={decisionFilterResult.hint} /> : null}
               {filteredDecisions.length === 0 ? (
                 <PanelState kind="empty" message="선택한 전략의 최근 의사결정 기록이 없습니다." />
               ) : (
@@ -627,53 +688,6 @@ function getSignalMeta(signal: StrategyCard["signalQuality"]) {
   }
 }
 
-function normalizeStrategyProfile(value: unknown): "A" | "B" | "C" | null {
-  const text = String(value ?? "").trim().toUpperCase();
-  if (!text) return null;
-  if (text === "A" || text.endsWith(".A") || text.includes("_A") || text.includes("-A") || text.includes("PROFILE_A") || text.includes("STRATEGY_A")) return "A";
-  if (text === "B" || text.endsWith(".B") || text.includes("_B") || text.includes("-B") || text.includes("PROFILE_B") || text.includes("STRATEGY_B")) return "B";
-  if (text === "C" || text.endsWith(".C") || text.includes("_C") || text.includes("-C") || text.includes("PROFILE_C") || text.includes("STRATEGY_C")) return "C";
-  return null;
-}
-
-function extractDecisionProfile(row: unknown): "A" | "B" | "C" | null {
-  const obj = (row ?? {}) as Record<string, unknown>;
-  return normalizeStrategyProfile(obj.profile ?? obj.strategy ?? obj.profileId ?? obj.profile_id ?? (obj.meta as Record<string, unknown> | undefined)?.profile);
-}
-
-function inferDecisionProfile(row: unknown): "A" | "B" | "C" | null {
-  const exact = extractDecisionProfile(row);
-  if (exact) return exact;
-
-  const obj = (row ?? {}) as Record<string, unknown>;
-  const candidates = [obj.reason, obj.action, obj.source, obj.message, obj.detail, JSON.stringify(obj.meta ?? {}), JSON.stringify(obj)];
-
-  const joined = candidates
-    .map((v) => String(v ?? "").toUpperCase())
-    .join(" | ");
-
-  const patterns: Array<["A" | "B" | "C", RegExp[]]> = [
-    ["A", [/PROFILE\s*[:=_-]?\s*A/, /STRATEGY\s*[:=_-]?\s*A/, /PAPER_DECISIONS\.A/, /PROFILES?[\]\["'\s:=_-]*A/]],
-    ["B", [/PROFILE\s*[:=_-]?\s*B/, /STRATEGY\s*[:=_-]?\s*B/, /PAPER_DECISIONS\.B/, /PROFILES?[\]\["'\s:=_-]*B/]],
-    ["C", [/PROFILE\s*[:=_-]?\s*C/, /STRATEGY\s*[:=_-]?\s*C/, /PAPER_DECISIONS\.C/, /PROFILES?[\]\["'\s:=_-]*C/]],
-  ];
-
-  for (const [profile, regexes] of patterns) {
-    if (regexes.some((re) => re.test(joined))) return profile;
-  }
-
-  return null;
-}
-
-function isSystemLevelDecision(row: unknown): boolean {
-  const obj = (row ?? {}) as Record<string, unknown>;
-  const profileText = String(obj.profile ?? "").toUpperCase();
-  if (profileText === "EVT" || profileText === "SYSTEM" || profileText === "INFRA") return true;
-
-  const source = `${String(obj.action ?? "")} ${String(obj.reason ?? "")} ${String(obj.status ?? "")}`.toLowerCase();
-  return ["event_5m_trigger", "executor_locked", "runtime_down", "ws_stalled", "event_stalled", "heartbeat"].some((token) => source.includes(token));
-}
-
 function directionLabel(direction: DashboardPayload["decisions"][number]["direction"]) {
   if (direction === "LONG") return "롱";
   if (direction === "SHORT") return "숏";
@@ -763,6 +777,326 @@ function ExecutionBadge({ executed, expected, skipped, rejected }: { executed: n
     >
       60분 실행 {executed}/{expected} · 스킵 {skipped} · 거절 {rejected}
     </span>
+  );
+}
+
+// ─── Binance Paper Trading Tab (ETH / BTC) ───────────────────────────────────
+
+function fmtNum(n: number | null | undefined, digits = 2): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "-";
+  return n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function ProcessDot({ active }: { active: boolean }) {
+  return (
+    <span className={`inline-block h-2.5 w-2.5 rounded-full ${active ? "bg-emerald-400" : "bg-rose-500"}`} />
+  );
+}
+
+function BinancePaperTab({
+  symbol,
+  data,
+  error,
+  nowMs,
+}: {
+  symbol: "ETH" | "BTC";
+  data: BinancePaperPayload | null;
+  error: string | null;
+  nowMs: number;
+}) {
+  const updatedAt = data?.updated_at ?? null;
+  const updatedLabel = updatedAt ? formatKstDateTime(updatedAt) : "-";
+  const relLabel = updatedAt ? formatRelativeFromNow(updatedAt, nowMs) : null;
+
+  return (
+    <main className="min-h-screen bg-[#050b14] text-slate-100 p-3 md:p-6 pt-4 md:pt-6">
+      <div className="mx-auto max-w-[1600px] space-y-5">
+        {/* Header */}
+        <header className="rounded-xl border border-slate-800/90 bg-[#0b1220] p-4 md:p-5 shadow-sm shadow-black/20">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Binance {symbol}/USDT 4h 페이퍼 트레이딩</h1>
+              <p className="text-xs md:text-sm text-slate-400">모든 시간은 KST 기준 · {BINANCE_PAPER_POLL_MS / 1000}초마다 갱신</p>
+              {relLabel ? (
+                <p className="text-[11px] text-slate-400">마지막 갱신 {updatedLabel} · {relLabel}</p>
+              ) : null}
+            </div>
+            {data?.current_price != null ? (
+              <div className="rounded border border-slate-800 bg-[#0f172a] px-4 py-3 min-w-[140px]">
+                <p className="text-[11px] text-slate-400">{symbol}/USDT 현재가</p>
+                <p className="text-xl font-semibold text-sky-200 tracking-tight">${fmtNum(data.current_price, 2)}</p>
+              </div>
+            ) : null}
+          </div>
+          {error ? (
+            <p className="mt-3 rounded border border-red-700/60 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+              데이터 갱신 오류: {error}
+            </p>
+          ) : null}
+          {!data && !error ? (
+            <p className="mt-3 rounded border border-slate-700 bg-slate-900/50 px-3 py-2 text-xs text-slate-300">
+              데이터를 불러오는 중입니다...
+            </p>
+          ) : null}
+        </header>
+
+        {/* Process Status */}
+        <section className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold tracking-wide text-slate-100">프로세스 상태</h2>
+            <p className="mt-0.5 text-xs text-slate-400">Binance {symbol} 페이퍼 트레이딩 구성 프로세스 실행 여부</p>
+          </div>
+          <div className="flex flex-wrap gap-4 text-sm">
+            {(
+              [
+                { key: "ws_collector" as "ws_collector", label: "WS Collector" },
+                { key: "bar_close_runner" as "bar_close_runner", label: "Bar Close Runner" },
+                { key: "event_executor" as "event_executor", label: "Event Executor" },
+              ]
+            ).map(({ key, label }) => {
+              const active = data?.processes[key] ?? false;
+              return (
+                <div
+                  key={key}
+                  className="flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-900/50 px-3 py-2"
+                >
+                  <ProcessDot active={active} />
+                  <span className="text-slate-200 font-medium">{label}</span>
+                  <span className={`text-xs ${active ? "text-emerald-400" : "text-rose-400"}`}>
+                    {active ? "실행 중" : "중단"}
+                  </span>
+                </div>
+              );
+            })}
+            {data?.ws_lag_sec != null ? (
+              <div className="flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-900/50 px-3 py-2">
+                <span className="text-slate-400 text-xs">WS Lag</span>
+                <span className="text-slate-200 font-medium text-sm">{fmtNum(data.ws_lag_sec, 2)}s</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {/* Stats */}
+        {data?.stats ? (
+          <section className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold tracking-wide text-slate-100">핵심 성과 지표</h2>
+              <p className="mt-0.5 text-xs text-slate-400">{symbol} 4h 페이퍼 트레이딩 누적 성과</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-3 py-2.5">
+                <p className="text-[11px] text-slate-400">총 거래수</p>
+                <p className="text-lg font-semibold text-slate-100 mt-1">{data.stats.trades}</p>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-3 py-2.5">
+                <p className="text-[11px] text-slate-400">PF (Profit Factor)</p>
+                <p
+                  className={`text-lg font-semibold mt-1 ${
+                    data.stats.pf === null
+                      ? "text-slate-400"
+                      : data.stats.pf >= 1.5
+                        ? "text-emerald-300"
+                        : data.stats.pf >= 1.0
+                          ? "text-amber-300"
+                          : "text-rose-300"
+                  }`}
+                >
+                  {data.stats.pf === null ? "-" : fmtNum(data.stats.pf, 2)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-3 py-2.5">
+                <p className="text-[11px] text-slate-400">승률</p>
+                <p
+                  className={`text-lg font-semibold mt-1 ${
+                    data.stats.win_rate_pct === null
+                      ? "text-slate-400"
+                      : data.stats.win_rate_pct >= 50
+                        ? "text-emerald-300"
+                        : "text-rose-300"
+                  }`}
+                >
+                  {data.stats.win_rate_pct === null ? "-" : `${fmtNum(data.stats.win_rate_pct, 1)}%`}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-3 py-2.5">
+                <p className="text-[11px] text-slate-400">기대값 (bps)</p>
+                <p
+                  className={`text-lg font-semibold mt-1 ${
+                    data.stats.expectancy_bps === null
+                      ? "text-slate-400"
+                      : data.stats.expectancy_bps > 0
+                        ? "text-emerald-300"
+                        : "text-rose-300"
+                  }`}
+                >
+                  {data.stats.expectancy_bps === null ? "-" : fmtNum(data.stats.expectancy_bps, 1)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-3 py-2.5">
+                <p className="text-[11px] text-slate-400">MDD</p>
+                <p
+                  className={`text-lg font-semibold mt-1 ${
+                    data.stats.max_drawdown_pct === null
+                      ? "text-slate-400"
+                      : data.stats.max_drawdown_pct <= -10
+                        ? "text-rose-300"
+                        : data.stats.max_drawdown_pct <= -5
+                          ? "text-amber-300"
+                          : "text-emerald-300"
+                  }`}
+                >
+                  {data.stats.max_drawdown_pct === null ? "-" : `${fmtNum(data.stats.max_drawdown_pct, 2)}%`}
+                </p>
+              </div>
+            </div>
+            {data.stats.equity > 0 ? (
+              <p className="mt-2 text-xs text-slate-400">
+                평가 자산: <span className="text-slate-200 font-medium">${fmtNum(data.stats.equity, 2)}</span>
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {/* Open Positions + Recent Trades */}
+        <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {/* Open Positions */}
+          <div className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold tracking-wide text-slate-100">오픈 포지션</h2>
+              <p className="mt-0.5 text-xs text-slate-400">현재 보유 포지션 목록</p>
+            </div>
+            {!data || data.open_positions.length === 0 ? (
+              <div className="rounded border border-dashed border-slate-700 p-4 text-sm text-slate-400">
+                대기중 (오픈 포지션 없음)
+              </div>
+            ) : (
+              <div className="overflow-x-auto text-xs">
+                <table className="w-full">
+                  <thead className="text-slate-400">
+                    <tr>
+                      <th className="text-left py-1 pr-2">ID</th>
+                      <th className="text-left py-1 pr-2">방향</th>
+                      <th className="text-right py-1 pr-2">진입가</th>
+                      <th className="text-right py-1 pr-2">명목금액</th>
+                      <th className="text-left py-1">진입 시각</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.open_positions.map((pos, i) => {
+                      const sideTone =
+                        pos.side.toUpperCase() === "LONG"
+                          ? "text-emerald-300"
+                          : pos.side.toUpperCase() === "SHORT"
+                            ? "text-rose-300"
+                            : "text-slate-300";
+                      return (
+                        <tr key={`${pos.trade_id}-${i}`} className="border-t border-slate-900/90 align-top">
+                          <td className="py-1 pr-2 text-slate-400 font-mono">{pos.trade_id || "-"}</td>
+                          <td className={`py-1 pr-2 font-semibold ${sideTone}`}>{pos.side || "-"}</td>
+                          <td className="py-1 pr-2 text-right text-slate-200">${fmtNum(pos.entry_price, 2)}</td>
+                          <td className="py-1 pr-2 text-right text-slate-200">${fmtNum(pos.notional, 2)}</td>
+                          <td className="py-1 text-slate-400">{formatKstDateTime(pos.entry_bar_ts)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Recent Trades */}
+          <div className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold tracking-wide text-slate-100">최근 거래</h2>
+              <p className="mt-0.5 text-xs text-slate-400">최근 10건 (최신순)</p>
+            </div>
+            {!data || data.recent_trades.length === 0 ? (
+              <div className="rounded border border-dashed border-slate-700 p-4 text-sm text-slate-400">
+                거래 기록이 없습니다.
+              </div>
+            ) : (
+              <div className="overflow-x-auto text-xs">
+                <table className="w-full">
+                  <thead className="text-slate-400">
+                    <tr>
+                      <th className="text-left py-1 pr-2">방향</th>
+                      <th className="text-right py-1 pr-2">진입가</th>
+                      <th className="text-right py-1 pr-2">청산가</th>
+                      <th className="text-right py-1 pr-2">수익(bps)</th>
+                      <th className="text-right py-1 pr-2">PnL</th>
+                      <th className="text-left py-1 pr-2">상태</th>
+                      <th className="text-left py-1">진입 시각</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.recent_trades.map((trade, i) => {
+                      const sideTone =
+                        trade.side.toUpperCase() === "LONG"
+                          ? "text-emerald-300"
+                          : trade.side.toUpperCase() === "SHORT"
+                            ? "text-rose-300"
+                            : "text-slate-300";
+                      const bpsTone =
+                        trade.net_ret_bps === null
+                          ? "text-slate-400"
+                          : trade.net_ret_bps > 0
+                            ? "text-emerald-300"
+                            : trade.net_ret_bps < 0
+                              ? "text-rose-300"
+                              : "text-slate-300";
+                      const pnlTone =
+                        trade.pnl === null
+                          ? "text-slate-400"
+                          : trade.pnl > 0
+                            ? "text-emerald-300"
+                            : trade.pnl < 0
+                              ? "text-rose-300"
+                              : "text-slate-300";
+                      return (
+                        <tr key={`${trade.trade_id}-${i}`} className="border-t border-slate-900/90 align-top">
+                          <td className={`py-1 pr-2 font-semibold ${sideTone}`}>{trade.side || "-"}</td>
+                          <td className="py-1 pr-2 text-right text-slate-200">${fmtNum(trade.entry_price, 2)}</td>
+                          <td className="py-1 pr-2 text-right text-slate-300">
+                            {trade.exit_price != null ? `$${fmtNum(trade.exit_price, 2)}` : "-"}
+                          </td>
+                          <td className={`py-1 pr-2 text-right font-medium ${bpsTone}`}>
+                            {trade.net_ret_bps != null ? fmtNum(trade.net_ret_bps, 1) : "-"}
+                          </td>
+                          <td className={`py-1 pr-2 text-right font-medium ${pnlTone}`}>
+                            {trade.pnl != null ? `$${fmtNum(trade.pnl, 2)}` : "-"}
+                          </td>
+                          <td className="py-1 pr-2 text-slate-400">{trade.status || "-"}</td>
+                          <td className="py-1 text-slate-400">{formatKstDateTime(trade.entry_bar_ts)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Candle Chart */}
+        <section className="rounded-xl border border-slate-800 bg-[#0b1220] p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold tracking-wide text-slate-100">캔들 차트</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {symbol}/USDT 1h 캔들 · 최근 200봉 · 축/툴팁 시간 KST
+            </p>
+          </div>
+          {data?.candles && data.candles.length > 0 ? (
+            <CandleChart data={data.candles} />
+          ) : (
+            <div className="flex items-center justify-center h-40 rounded border border-dashed border-slate-700 text-sm text-slate-500">
+              캔들 데이터를 불러오는 중입니다...
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
   );
 }
 
